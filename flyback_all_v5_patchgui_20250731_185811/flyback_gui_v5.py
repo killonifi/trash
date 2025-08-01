@@ -11,6 +11,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json, os
 from typing import Dict, Any
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.figure as mplfig
 try:
     from flyback_design_v5 import (
         parse_num, FlybackInput, OutputSpec, Geometry, CoreParameters, Steinmetz,
@@ -81,6 +83,8 @@ class App(tk.Tk):
         self.build_stein_tab()
         self.build_k_tab()
         self.build_library_tab()
+        self.build_waveforms_tab()
+        self.build_transformer_tab()
         self.build_results_tab()
         self.create_menu()
     def create_menu(self):
@@ -250,6 +254,25 @@ class App(tk.Tk):
         ttk.Button(top, text="Save report...", command=self.save_report).pack(side="left", padx=4)
         self.res_text = tk.Text(tab, wrap="none", font=("Consolas", 10))
         self.res_text.pack(fill="both", expand=True)
+
+    def build_waveforms_tab(self):
+        tab = ttk.Frame(self.nb); self.nb.add(tab, text="Waveforms")
+        self.fig = mplfig.Figure(figsize=(7,5))
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_xlabel("t [s]")
+        self.ax.set_ylabel("Value")
+        self.canvas = FigureCanvasTkAgg(self.fig, master=tab)
+        self.canvas.get_tk_widget().pack(side="left", fill="both", expand=True)
+        ctrl = ttk.Frame(tab, padding=10); ctrl.pack(side="right", fill="y")
+        self.chk_vars = {}
+        self.chk_buttons_frame = ctrl
+
+    def build_transformer_tab(self):
+        tab = ttk.Frame(self.nb); self.nb.add(tab, text="Transformer")
+        ttk.Label(tab, text="Edit turn counts and press Apply. Np is reference.").pack(anchor="w", padx=8, pady=4)
+        self.tr_text = tk.Text(tab, height=8)
+        self.tr_text.pack(fill="x", padx=8)
+        ttk.Button(tab, text="Apply", command=self.apply_transformer).pack(anchor="e", padx=8, pady=6)
     def add_output(self):
         d = OutputDialog(self); self.wait_window(d)
         if d.result:
@@ -376,6 +399,10 @@ class App(tk.Tk):
             lines.append(f"DCM_ok = {r['dcm_ok_main']}")
             lines.append(f"VDS ideal = {r['vds_ideal_V']:.2f} V")
             lines.append(f"VDS with clamp = {r['vds_with_overhead_V']:.2f} V")
+            if r.get('rcd'):
+                rc = r['rcd']
+                lines.append(f"RCD: Llk={rc['Llk_H']:.3e} H, Vclamp={rc['Vclamp_V']:.1f} V")
+                lines.append(f"     Csnub={rc['C_snub_F']:.3e} F, Rsnub={rc['R_snub_Ohm']:.1f} Ω, tau={rc['tau_s']:.3e} s")
             lines.append("")
             lines.append("--- ПРОВОДНИКИ ---")
             lines.append(f"A_cu_primary = {r['wires']['primary_area_mm2']:.6f} мм^2; d_eq = {r['wires']['primary_dia_mm']:.3f} мм; strands = {int(r['wires']['primary_strands'])}")
@@ -403,6 +430,10 @@ class App(tk.Tk):
             lines.append("")
             lines.append("(Этап 2 не выполнен — задайте Core и Geometry)")
         self.res_text.insert("1.0", "\n".join(lines))
+
+        if "waveforms" in res:
+            self.plot_waveforms(res["waveforms"])
+            self.populate_transformer(res)
     def save_json(self):
         cfg = self.collect_cfg()
         path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON","*.json"),("All","*.*")])
@@ -417,7 +448,7 @@ class App(tk.Tk):
             self.model = cfg
             for w in self.nb.winfo_children(): w.destroy()
             self.build_inputs_tab(); self.build_outputs_tab(); self.build_core_tab()
-            self.build_geom_tab(); self.build_clamp_tab(); self.build_mosfet_tab(); self.build_stein_tab(); self.build_k_tab(); self.build_library_tab(); self.build_results_tab()
+            self.build_geom_tab(); self.build_clamp_tab(); self.build_mosfet_tab(); self.build_stein_tab(); self.build_k_tab(); self.build_library_tab(); self.build_waveforms_tab(); self.build_transformer_tab(); self.build_results_tab()
         except Exception as e:
             messagebox.showerror("Load JSON error", str(e))
     def save_report(self):
@@ -428,5 +459,54 @@ class App(tk.Tk):
         if not path: return
         open(path,"w",encoding="utf-8").write(data)
         messagebox.showinfo("Saved", path)
+
+    def plot_waveforms(self, wf: Dict[str, Any]):
+        self.ax.clear()
+        for child in self.chk_buttons_frame.winfo_children():
+            child.destroy()
+        self.chk_vars.clear()
+        lines = {}
+        for name,(t,val) in wf.items():
+            line, = self.ax.plot(t, val, label=name)
+            lines[name] = line
+        self.ax.legend()
+        for name,line in lines.items():
+            var = tk.BooleanVar(value=True)
+            def cmd(l=line, v=var):
+                l.set_visible(v.get()); self.canvas.draw()
+            chk = ttk.Checkbutton(self.chk_buttons_frame, text=name, variable=var, command=cmd)
+            chk.pack(anchor="w")
+            self.chk_vars[name] = var
+        self.canvas.draw()
+
+    def populate_transformer(self, res: Dict[str, Any]):
+        if "refined" not in res:
+            return
+        r = res["refined"]
+        np_t = r["np_turns"]
+        txt = f"Np = {np_t}\n"
+        for name, ns in r["ns_turns"].items():
+            txt += f"Ns_{name} = {ns}\n"
+        self.tr_text.delete("1.0","end")
+        self.tr_text.insert("1.0", txt)
+
+    def apply_transformer(self):
+        data = self.tr_text.get("1.0","end").strip().splitlines()
+        if not data:
+            return
+        try:
+            np_t = int(data[0].split("=")[1])
+            ns = [int(l.split("=")[1]) for l in data[1:]]
+        except Exception:
+            messagebox.showerror("Error","Bad turns format")
+            return
+        cfg = self.collect_cfg()
+        cfg["turns_override"] = {"np": np_t, "ns": {cfg["outputs"][i]["name"]: ns[i] for i in range(len(ns))}}
+        cfg_norm = normalize_cfg(cfg)
+        try:
+            res = run(cfg_norm)
+            self.show_results(res)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 if __name__ == "__main__":
     app = App(); app.mainloop()
