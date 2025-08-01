@@ -11,6 +11,8 @@ f_line [Hz]                 — частота сети.
 overload                    — коэффициент перегрузки по мощности.
 main_output                 — имя основной вторички (по ней задаётся K).
 cin_vrip [Vpp]              — допустимая пульсация входного конденсатора.
+steinmetz {k,α,β}           — параметры расчёта потерь в сердечнике по формуле
+                               P_v=k·f^α·B^β.
 
 Outputs (многовыходные)
 ------------------------
@@ -20,6 +22,7 @@ Ripple Vpp [V]              — допустимая пульсация.
 Diode Vf [V]                — падение на диоде.
 MLT sec [mm]                — средняя длина витка вторички.
 Qrr [nC]                    — заряд обратного восстановления (опционально).
+ns_turns                    — число витков (если задано во вкладке Transformer).
 
 Core / Geometry
 ---------------
@@ -41,6 +44,7 @@ MLT pri/sec [мм], Jmax [A/мм^2], T_cu [°C], AC factors (pri/sec)
 (10) g ≈ μ0 · N_p^2 · Ae / Lm_target
 (11) R_dc = ρ(T) · l / A,  P_cu = I_rms^2 · R_dc · k_ac
 (12) Стейнмец: P_v = k · f^α · B^β,  P_core = P_v · V_core
+(12a) k, α, β берутся из паспортных данных материала сердечника.
 (13) MOSFET: P_cond, P_sw ≈ 0.5·VDS·Ipk·(tr+tf)·fs·k_sw, P_Coss ≈ 0.5·Coss·VDS^2·fs, P_gate = Qg·Vg·fs
 (14) Диод: P_cond ≈ I_out·Vf;  P_rr ≈ Q_rr·V_rev·f_sw
 
@@ -55,3 +59,5 @@ MLT pri/sec [мм], Jmax [A/мм^2], T_cu [°C], AC factors (pri/sec)
 Этап 1: Pout_total, Lm_target, Ipk, Irms, D(Vin_min/max), K, Vref, VDS_ideal, Cin_min, Cout_min[выход].
 Этап 2: Np, Ns[выход], K_actual, g, Lm_actual, Ipk, Irms, t_off, DCM_ok, провода/skin, fill-factor,
         VRRM[выход], VDS (ideal/with clamp), потери по статьям, оценка η.
+        Если включен RCD clamp, выводятся Llk, E_lk, P_lk, Vclamp, C_snub, R_snub, tau.
+New features added in this patch: графики переходных процессов на вкладке Waveforms, редактирование обмоток во вкладке Transformer.

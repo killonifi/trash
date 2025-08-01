@@ -136,6 +136,7 @@ class RefinedDesign:
     core_loss_W: Optional[float]
     losses: Dict[str, Any]
     notes: Dict[str, Any]
+    waveforms: Optional[Dict[str, Any]] = None
 
 # ----- computations -----
 
@@ -192,12 +193,14 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
                      ini: InitialDesign, outputs: List[OutputSpec],
                      rcd: Optional[RCDClamp]=None,
                      stein: Optional[Steinmetz]=None,
-                     mosfet: Optional[MosfetParams]=None) -> RefinedDesign:
+                     mosfet: Optional[MosfetParams]=None,
+                     np_override: Optional[int]=None,
+                     ns_override: Optional[Dict[str,int]]=None) -> RefinedDesign:
     Ae = core.ae_mm2 * 1e-6
     # Minimum turns from ΔB
     Duse = ini.d_vin_min
     np_min = math.ceil((fin.vin_max * Duse) / (core.bmax_T * Ae * fin.fsw))
-    np_turns = int(np_min)
+    np_turns = int(np_override if np_override else np_min)
 
     main_name = fin.main_output or outputs[0].name
     main = next(o for o in outputs if o.name == main_name)
@@ -205,8 +208,11 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
     # Ns per output from ideal K rounding
     ns_turns: Dict[str,int] = {}
     for o in outputs:
-        k_ideal = ini.per_output[o.name]["k_np_over_ns_ideal"]
-        ns_turns[o.name] = max(1, int(round(np_turns / max(k_ideal, 1e-12))))
+        if ns_override and o.name in ns_override:
+            ns_turns[o.name] = int(ns_override[o.name])
+        else:
+            k_ideal = ini.per_output[o.name]["k_np_over_ns_ideal"]
+            ns_turns[o.name] = max(1, int(round(np_turns / max(k_ideal, 1e-12))))
 
     k_act = np_turns / ns_turns[main_name]
 
@@ -345,13 +351,35 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
 
     notes = dict(np_min_from_Bmax=np_turns, period_s=period)
 
+    # --- simple current/voltage waveforms (for GUI plots) ---
+    T = period
+    D = ini.d_vin_min
+    wave = {
+        "i_primary": ([0.0, D*T, T], [0.0, ipk, 0.0]),
+        "v_primary": ([0.0, D*T, D*T, T], [fin.vin_min, fin.vin_min,
+                         -(main.v + main.diode_drop) * k_act, -(main.v + main.diode_drop) * k_act])
+    }
+    for o in outputs:
+        ns = ns_turns[o.name]
+        ratio = ns / np_turns
+        ipk_sec = ipk * (np_turns / ns)
+        toff_o = lm_actual * ipk * ratio / (o.v + o.diode_drop)
+        if toff_o > (1-D)*T:
+            toff_o = (1-D)*T
+        wave[f"i_sec_{o.name}"] = ([D*T, D*T+toff_o, T], [ipk_sec, 0.0, 0.0])
+        wave[f"v_sec_{o.name}"] = ([0.0, D*T, D*T, D*T+toff_o, D*T+toff_o, T],
+                                    [-fin.vin_min*ratio, -fin.vin_min*ratio,
+                                     o.v + o.diode_drop, o.v + o.diode_drop,
+                                     0.0, 0.0])
+
     return RefinedDesign(
         np_turns=np_turns, ns_turns=ns_turns, k_actual_np_over_ns_main=k_act,
         gap_m=gap, lm_actual_H=lm_actual, ipk_new_A=ipk, irms_pri_new_A=irms_pri,
         dcm_ok_main=dcm_ok, t_off_main_s=toff, lsec_main_H=lsec_main,
         wires=wires, vds_ideal_V=vds_ideal, vds_with_overhead_V=vds_required,
         diode_vrrm_ideal_each_V=diode_vrrm_ideal_each, diode_vrrm_required_each_V=diode_vrrm_required_each,
-        fill_factor=fill_factor, rcd=rcd_info, core_loss_W=p_core_W, losses=losses, notes=notes
+        fill_factor=fill_factor, rcd=rcd_info, core_loss_W=p_core_W, losses=losses, notes=notes,
+        waveforms=wave
     )
 
 def sweep_k(fin: FlybackInput, outputs: List[OutputSpec], geom: Geometry, core: CoreParameters,
@@ -419,6 +447,11 @@ def run(cfg: Dict[str, Any], corelib: Optional[Dict[str, Any]] = None) -> Dict[s
     outs = [OutputSpec(**o) for o in cfg["outputs"]]
     cin_vrip = cfg.get("cin_vrip", 5.0)
     vref_override = cfg.get("vref_override", None)
+    turns_override = cfg.get("turns_override")
+    np_over = None; ns_over = None
+    if turns_override:
+        np_over = parse_num(turns_override.get("np")) if turns_override.get("np") else None
+        ns_over = {k:int(parse_num(v)) for k,v in turns_override.get("ns", {}).items()}
     ini = estimate_initial_design(fin, outs, cin_vrip=cin_vrip, vref_override=vref_override)
 
     res = {"input": asdict(fin), "outputs":[asdict(o) for o in outs], "initial": asdict(ini)}
@@ -440,9 +473,12 @@ def run(cfg: Dict[str, Any], corelib: Optional[Dict[str, Any]] = None) -> Dict[s
             best_ini = sweep["best"]["ini"]; best_ref = sweep["best"]["ref"]
             res["initial"] = asdict(best_ini)
             res["refined"] = asdict(best_ref)
+            res["waveforms"] = best_ref.waveforms
         else:
-            ref = refine_with_core(fin, geom, core, ini, outs, rcd=rcd, stein=stein, mosfet=mosfet)
+            ref = refine_with_core(fin, geom, core, ini, outs, rcd=rcd, stein=stein, mosfet=mosfet,
+                                   np_override=np_over, ns_override=ns_over)
             res["refined"] = asdict(ref)
+            res["waveforms"] = ref.waveforms
 
     if corelib:
         res["core_library"] = corelib
