@@ -60,6 +60,16 @@ class App(tk.Tk):
         super().__init__()
         self.title("Flyback Design Tool v12 (DCM)")
         self.geometry("1100x760")
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure("TButton", padding=6)
+        style.configure("Accent.TButton", padding=6, foreground="white", background="#0078D7")
+        style.map("Accent.TButton", background=[('active', '#005A9E')])
+        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
+        self.option_add("*Font", "Segoe UI 10")
         nb = ttk.Notebook(self); nb.pack(fill="both", expand=True)
         self.nb = nb
         self.model: Dict[str, Any] = {
@@ -117,14 +127,24 @@ class App(tk.Tk):
     def build_outputs_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Outputs")
         frm = ttk.Frame(tab, padding=10); frm.pack(fill="both", expand=True)
+        table = ttk.Frame(frm)
+        table.pack(fill="both", expand=True, side="left")
         cols=("name","v","i","ripple_v","diode_drop","mlt_mm","qrr_nC")
-        self.tree = ttk.Treeview(frm, columns=cols, show="headings")
+        self.tree = ttk.Treeview(table, columns=cols, show="headings")
         for c in cols:
-            self.tree.heading(c, text=c); self.tree.column(c, width=110, anchor="center")
-        self.tree.pack(fill="both", expand=True, side="left")
+            self.tree.heading(c, text=c)
+            self.tree.column(c, width=110, anchor="center", stretch=False)
+        ysb = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
+        xsb = ttk.Scrollbar(table, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        ysb.grid(row=0, column=1, sticky="ns")
+        xsb.grid(row=1, column=0, sticky="ew")
+        table.columnconfigure(0, weight=1)
+        table.rowconfigure(0, weight=1)
         for o in self.model["outputs"]:
             self.tree.insert("", "end", values=[o.get(c,"") for c in cols])
-        btns = ttk.Frame(frm); btns.pack(side="right", fill="y")
+        btns = ttk.Frame(frm); btns.pack(side="left", fill="y", padx=6)
         ttk.Button(btns, text="Add", command=self.add_output).pack(fill="x", padx=5, pady=5)
         ttk.Button(btns, text="Edit", command=self.edit_output).pack(fill="x", padx=5, pady=5)
         ttk.Button(btns, text="Remove", command=self.remove_output).pack(fill="x", padx=5, pady=5)
@@ -202,8 +222,17 @@ class App(tk.Tk):
         btns = ttk.Frame(tab, padding=8); btns.pack(fill="x")
         ttk.Button(btns, text="Run sweep", command=self.run_sweep).pack(side="left", padx=5)
         ttk.Button(btns, text="Apply best K", command=self.apply_best).pack(side="left", padx=5)
-        self.k_result = tk.Text(tab, height=16, wrap="none")
-        self.k_result.pack(fill="both", expand=True, padx=8, pady=6)
+        result_frame = ttk.Frame(tab, padding=8)
+        result_frame.pack(fill="both", expand=True)
+        self.k_result = tk.Text(result_frame, height=16, wrap="none", font=("Consolas", 10))
+        ysb = ttk.Scrollbar(result_frame, orient="vertical", command=self.k_result.yview)
+        xsb = ttk.Scrollbar(result_frame, orient="horizontal", command=self.k_result.xview)
+        self.k_result.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
+        self.k_result.grid(row=0, column=0, sticky="nsew")
+        ysb.grid(row=0, column=1, sticky="ns")
+        xsb.grid(row=1, column=0, sticky="ew")
+        result_frame.columnconfigure(0, weight=1)
+        result_frame.rowconfigure(0, weight=1)
     def build_library_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Core Library")
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
@@ -211,13 +240,22 @@ class App(tk.Tk):
         ttk.Button(top, text="Use selected", command=self.use_selected_core).pack(side="left", padx=6)
         ttk.Label(top, text="(double-click row to apply)").pack(side="left", padx=6)
         cols=("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped")
-        self.core_tree = ttk.Treeview(tab, columns=cols, show="headings")
+        table = ttk.Frame(tab)
+        table.pack(fill="both", expand=True, padx=6, pady=6)
+        self.core_tree = ttk.Treeview(table, columns=cols, show="headings")
         for c in cols:
             self.core_tree.heading(c, text=c)
             w = 120 if c in ("distributor_sku","size") else 90
             if c in ("Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped"): w=110
-            self.core_tree.column(c, width=w, anchor="center")
-        self.core_tree.pack(fill="both", expand=True, padx=6, pady=6)
+            self.core_tree.column(c, width=w, anchor="center", stretch=False)
+        ysb = ttk.Scrollbar(table, orient="vertical", command=self.core_tree.yview)
+        xsb = ttk.Scrollbar(table, orient="horizontal", command=self.core_tree.xview)
+        self.core_tree.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
+        self.core_tree.grid(row=0, column=0, sticky="nsew")
+        ysb.grid(row=0, column=1, sticky="ns")
+        xsb.grid(row=1, column=0, sticky="ew")
+        table.columnconfigure(0, weight=1)
+        table.rowconfigure(0, weight=1)
         self.core_tree.bind("<Double-1>", lambda e: self.use_selected_core())
         self.core_tree.bind("<Motion>", self.on_core_hover)
         self.tooltip=None
@@ -252,10 +290,19 @@ class App(tk.Tk):
     def build_results_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Results")
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
-        ttk.Button(top, text="Compute", command=self.compute).pack(side="left", padx=4)
+        ttk.Button(top, text="Compute", command=self.compute, style="Accent.TButton").pack(side="left", padx=4)
         ttk.Button(top, text="Save report...", command=self.save_report).pack(side="left", padx=4)
-        self.res_text = tk.Text(tab, wrap="none", font=("Consolas", 10))
-        self.res_text.pack(fill="both", expand=True)
+        text_frame = ttk.Frame(tab)
+        text_frame.pack(fill="both", expand=True)
+        self.res_text = tk.Text(text_frame, wrap="none", font=("Consolas", 10))
+        ysb = ttk.Scrollbar(text_frame, orient="vertical", command=self.res_text.yview)
+        xsb = ttk.Scrollbar(text_frame, orient="horizontal", command=self.res_text.xview)
+        self.res_text.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
+        self.res_text.grid(row=0, column=0, sticky="nsew")
+        ysb.grid(row=0, column=1, sticky="ns")
+        xsb.grid(row=1, column=0, sticky="ew")
+        text_frame.columnconfigure(0, weight=1)
+        text_frame.rowconfigure(0, weight=1)
     def add_output(self):
         d = OutputDialog(self); self.wait_window(d)
         if d.result:
@@ -434,13 +481,20 @@ class App(tk.Tk):
         path = filedialog.askopenfilename(filetypes=[("JSON","*.json"),("All","*.*")])
         if not path: return
         try:
-            
+
             cfg = json.load(open(path,"r",encoding="utf-8"))
             # migrate cin_vrip from root to input if needed
             if "cin_vrip" in cfg and "input" in cfg:
                 cfg["input"]["cin_vrip"] = cfg["cin_vrip"]
             if "cin_vrrip" in cfg and "input" in cfg:
                 cfg["input"]["cin_vrip"] = cfg.pop("cin_vrrip")
+            core = cfg.get("core", {})
+            if "bmax_T" not in core:
+                for alt in ("bmax", "Bmax", "Bmax_T"):
+                    if alt in core:
+                        core["bmax_T"] = core[alt]
+                        break
+            cfg["core"] = core
             self.model = cfg
 
             self.model = cfg
