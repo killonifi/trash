@@ -41,21 +41,22 @@ AWG_TABLE = [
     (39, 0.00632), (40, 0.0050)
 ]
 
-def select_awg(area_req: float, delta_mm: Optional[float] = None) -> Dict[str, float]:
-    """Pick an AWG size and number of parallels so total area ≥ area_req.
+def select_awg(area_req: float, delta_mm: Optional[float] = None,
+               max_parallel: int = 100) -> Dict[str, float]:
+    """Pick an AWG size and number of parallels so total area ≥ ``area_req``.
 
-    If ``delta_mm`` is provided, only gauges whose diameter does not exceed
-    ``2*delta_mm`` are considered first, thus favouring thinner strands that
-    reduce skin‑effect losses.  The search always restricts the number of
-    parallel wires to at most five; if no suitable combination is found within
-    the skin‑depth limit, the full table is searched as a fall‑back.
+    When ``delta_mm`` is provided the search space is restricted to gauges whose
+    *individual* strand diameter is strictly less than ``2*delta_mm``. Unlike the
+    previous implementation, the routine may employ many parallel strands (up to
+    ``max_parallel``) in order to satisfy the required copper area without ever
+    violating the skin‑depth rule. No fall-back to thicker wires is performed.
     """
 
     def eval_table(table):
         best = None  # (gauge, area, n, total)
         for gauge, area in table:
             n = max(1, math.ceil(area_req / area))
-            if n > 5:
+            if n > max_parallel:
                 continue
             total = n * area
             if best is None or (n < best[2]) or (n == best[2] and total < best[3]):
@@ -67,17 +68,14 @@ def select_awg(area_req: float, delta_mm: Optional[float] = None) -> Dict[str, f
         limit = 2.0 * delta_mm
         table = [
             (g, a) for g, a in AWG_TABLE
-            if math.sqrt(4.0 * a / math.pi) <= limit
+            if math.sqrt(4.0 * a / math.pi) < limit
         ]
-        best = eval_table(table)
-        if best is None:
-            best = eval_table(AWG_TABLE)
-    else:
-        best = eval_table(AWG_TABLE)
+
+    best = eval_table(table)
 
     if best is None:
-        gauge, area = AWG_TABLE[-1]
-        n = min(5, math.ceil(area_req / area))
+        gauge, area = table[-1] if table else AWG_TABLE[-1]
+        n = min(max_parallel, math.ceil(area_req / area))
         total = n * area
         best = (gauge, area, n, total)
 

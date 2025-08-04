@@ -369,18 +369,21 @@ class App(tk.Tk):
             sweep = sweep_k(fin, outs, geom, core, rcd=rcd, stein=stein, mosfet=mos, criterion=crit,
                              dmin=dmin, dmax=dmax, dstep=dstep, cin_vrip=cfg_norm.get("cin_vrip",5.0),
                              force_dcm=fin.force_dcm)
-            lines = []
-            lines.append(f"Criterion: {crit}")
-            header = ["D", "Vref[V]", "K_ideal", "Vds[V]", "Ipk[A]"]
+            lines = [f"Criterion: {crit}"]
+            col_specs = [
+                ("D", lambda r: r["D"], "{:>6.3f}", 6),
+                ("Vref[V]", lambda r: r["Vref"], "{:>8.1f}", 8),
+                ("K_ideal", lambda r: r["K"], "{:>8.3f}", 8),
+                ("Vds[V]", lambda r: r["Vds"], "{:>8.1f}", 8),
+                ("Ipk[A]", lambda r: r["Ipk"], "{:>8.2f}", 8),
+            ]
             for o in outs:
-                header.append(f"VRRM_{o.name}[V]")
-            header.append("Ploss[W]")
-            lines.append("  ".join(header))
+                col_specs.append((f"VRRM_{o.name}[V]", lambda r, nm=o.name: r[f"VRRM_{nm}"], "{:>10.1f}", 10))
+            col_specs.append(("Ploss[W]", lambda r: r["Ploss"], "{:>10.2f}", 10))
+            header_line = " ".join(f"{name:>{width}}" for name, _, _, width in col_specs)
+            lines.append(header_line)
             for row in sweep["grid"]:
-                line = f"{row['D']:.3f}  {row['Vref']:.1f}  {row['K']:.3f}   {row['Vds']:.1f}   {row['Ipk']:.2f}"
-                for o in outs:
-                    line += f"   {row[f'VRRM_{o.name}']:.1f}"
-                line += f"     {row['Ploss']:.2f}"
+                line = " ".join(fmt.format(fn(row)) for _, fn, fmt, _ in col_specs)
                 lines.append(line)
             best = sweep["best"]
             lines.append("")
