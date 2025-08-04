@@ -371,9 +371,17 @@ class App(tk.Tk):
                              force_dcm=fin.force_dcm)
             lines = []
             lines.append(f"Criterion: {crit}")
-            lines.append("D     Vref[V]   K_ideal  Vds[V]   Ipk[A]  VRRM_max[V]  Ploss[W]")
+            header = ["D", "Vref[V]", "K_ideal", "Vds[V]", "Ipk[A]"]
+            for o in outs:
+                header.append(f"VRRM_{o.name}[V]")
+            header.append("Ploss[W]")
+            lines.append("  ".join(header))
             for row in sweep["grid"]:
-                lines.append(f"{row['D']:.3f}  {row['Vref']:.1f}  {row['K']:.3f}   {row['Vds']:.1f}   {row['Ipk']:.2f}   {row['VRRM_max']:.1f}     {row['Ploss']:.2f}")
+                line = f"{row['D']:.3f}  {row['Vref']:.1f}  {row['K']:.3f}   {row['Vds']:.1f}   {row['Ipk']:.2f}"
+                for o in outs:
+                    line += f"   {row[f'VRRM_{o.name}']:.1f}"
+                line += f"     {row['Ploss']:.2f}"
+                lines.append(line)
             best = sweep["best"]
             lines.append("")
             lines.append(f"BEST: D={best['D']:.3f}")
@@ -433,13 +441,14 @@ class App(tk.Tk):
             lines.append(f"VDS ideal = {r['vds_ideal_V']:.2f} V")
             lines.append(f"VDS with clamp = {r['vds_with_overhead_V']:.2f} V")
             lines.append("")
-            vrrm_max = max(r['diode_vrrm_required_each_V'].values()) if r.get('diode_vrrm_required_each_V') else None
-            if vrrm_max is not None:
-                lines.append(f"VRRM_max(sec) = {vrrm_max:.2f} V")
+            if r.get('diode_vrrm_required_each_V'):
+                for name, v in r['diode_vrrm_required_each_V'].items():
+                    lines.append(f"VRRM[{name}] = {v:.2f} V")
             if r.get('rcd'):
                 rc = r['rcd']
                 lines.append(f"RCD clamp: Vclamp = {rc['Vclamp_V']:.1f} V; C = {rc['C_snub_F']:.3e} F; R = {rc['R_snub_Ohm']:.1f} Ω; P_snub = {rc['P_lk_W']:.2f} W")
             lines.append("--- ПРОВОДНИКИ ---")
+            lines.append(f"Skin depth ≈ {r['wires']['skin_depth_mm']:.3f} мм")
             lines.append(
                 f"A_cu_primary = {r['wires']['primary_area_mm2']:.6f} мм^2 -> {r['wires']['primary_awg']}"
                 f" ({r['wires']['primary_awg_area_mm2']:.3f} мм^2) x{int(r['wires']['primary_parallel'])}"
