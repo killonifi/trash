@@ -42,19 +42,32 @@ AWG_TABLE = [
 ]
 
 def select_awg(area_req: float) -> Dict[str, float]:
-    """Pick AWG size and number of parallels so total area ≥ area_req, strands ≤5."""
-    best = None
+    """Pick AWG size and number of parallels so total area ≥ area_req, strands ≤5.
+
+    The previous implementation minimised only the excess copper area and could
+    prefer many thin wires when their combined area happened to match the
+    requirement.  In practice, winding with several parallel wires complicates
+    manufacturing, especially for high turn counts.  This version first
+    minimises the number of parallel strands and only then the total copper
+    area, yielding more practical single‑wire solutions when possible.
+    """
+
+    best = None  # (gauge, area, n, total, excess)
     for gauge, area in AWG_TABLE:
         n = max(1, math.ceil(area_req / area))
         if n > 5:
             continue
-        excess = n * area - area_req
-        if best is None or excess < best[4]:
-            best = (gauge, area, n, n * area, excess)
+        total = n * area
+        excess = total - area_req
+        if best is None or (n < best[2]) or (n == best[2] and total < best[3]):
+            best = (gauge, area, n, total, excess)
+
     if best is None:
         gauge, area = AWG_TABLE[-1]
         n = min(5, math.ceil(area_req / area))
-        best = (gauge, area, n, n * area, n * area - area_req)
+        total = n * area
+        best = (gauge, area, n, total, total - area_req)
+
     gauge, area, n, total, _ = best
     return {"awg": f"AWG{gauge}", "awg_area_mm2": area, "parallel": n, "total_area_mm2": total}
 
