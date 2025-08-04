@@ -41,34 +41,47 @@ AWG_TABLE = [
     (39, 0.00632), (40, 0.0050)
 ]
 
-def select_awg(area_req: float) -> Dict[str, float]:
-    """Pick AWG size and number of parallels so total area ≥ area_req, strands ≤5.
+def select_awg(area_req: float, delta_mm: Optional[float] = None) -> Dict[str, float]:
+    """Pick an AWG size and number of parallels so total area ≥ area_req.
 
-    The previous implementation minimised only the excess copper area and could
-    prefer many thin wires when their combined area happened to match the
-    requirement.  In practice, winding with several parallel wires complicates
-    manufacturing, especially for high turn counts.  This version first
-    minimises the number of parallel strands and only then the total copper
-    area, yielding more practical single‑wire solutions when possible.
+    If ``delta_mm`` is provided, only gauges whose diameter does not exceed
+    ``2*delta_mm`` are considered first, thus favouring thinner strands that
+    reduce skin‑effect losses.  The search always restricts the number of
+    parallel wires to at most five; if no suitable combination is found within
+    the skin‑depth limit, the full table is searched as a fall‑back.
     """
 
-    best = None  # (gauge, area, n, total, excess)
-    for gauge, area in AWG_TABLE:
-        n = max(1, math.ceil(area_req / area))
-        if n > 5:
-            continue
-        total = n * area
-        excess = total - area_req
-        if best is None or (n < best[2]) or (n == best[2] and total < best[3]):
-            best = (gauge, area, n, total, excess)
+    def eval_table(table):
+        best = None  # (gauge, area, n, total)
+        for gauge, area in table:
+            n = max(1, math.ceil(area_req / area))
+            if n > 5:
+                continue
+            total = n * area
+            if best is None or (n < best[2]) or (n == best[2] and total < best[3]):
+                best = (gauge, area, n, total)
+        return best
+
+    table = AWG_TABLE
+    if delta_mm is not None:
+        limit = 2.0 * delta_mm
+        table = [
+            (g, a) for g, a in AWG_TABLE
+            if math.sqrt(4.0 * a / math.pi) <= limit
+        ]
+        best = eval_table(table)
+        if best is None:
+            best = eval_table(AWG_TABLE)
+    else:
+        best = eval_table(AWG_TABLE)
 
     if best is None:
         gauge, area = AWG_TABLE[-1]
         n = min(5, math.ceil(area_req / area))
         total = n * area
-        best = (gauge, area, n, total, total - area_req)
+        best = (gauge, area, n, total)
 
-    gauge, area, n, total, _ = best
+    gauge, area, n, total = best
     return {"awg": f"AWG{gauge}", "awg_area_mm2": area, "parallel": n, "total_area_mm2": total}
 
 @dataclass
@@ -283,7 +296,7 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
     delta = skin_depth_mm(fin.fsw)
     wires: Dict[str, Dict[str,float]] = {}
     area_pri = irms_pri / geom.jmax_A_per_mm2
-    sel_pri = select_awg(area_pri)
+    sel_pri = select_awg(area_pri, delta)
     wires["primary_area_mm2"] = area_pri
     wires["primary_awg"] = sel_pri["awg"]
     wires["primary_awg_area_mm2"] = sel_pri["awg_area_mm2"]
@@ -295,10 +308,13 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
     for o in outputs:
         k_i = np_turns / ns_turns[o.name]
         ipk_sec = ipk * k_i
-        irms_sec = ipk_sec * ((1.0 - ini.d_vin_min)/3.0) ** 0.5
+        toff_i = min((2.0 * o.i * period) / max(1e-12, ipk_sec),
+                      (1.0 - ini.d_vin_min) * period)
+        duty_i = toff_i / period
+        irms_sec = ipk_sec * math.sqrt(duty_i/3.0)
         irms_sec_map[o.name] = irms_sec
         area_sec = irms_sec / geom.jmax_A_per_mm2
-        sel = select_awg(area_sec)
+        sel = select_awg(area_sec, delta)
         wires[f"{o.name}_area_mm2"] = area_sec
         wires[f"{o.name}_awg"] = sel["awg"]
         wires[f"{o.name}_awg_area_mm2"] = sel["awg_area_mm2"]
