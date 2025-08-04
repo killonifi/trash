@@ -69,7 +69,7 @@ class App(tk.Tk):
         style.configure("Accent.TButton", padding=6, foreground="white", background="#0078D7")
         style.map("Accent.TButton", background=[('active', '#005A9E')])
         style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
-        self.option_add("*Font", "Segoe UI 10")
+        self.option_add("*Font", "{Segoe UI} 10")
         nb = ttk.Notebook(self); nb.pack(fill="both", expand=True)
         self.nb = nb
         self.model: Dict[str, Any] = {
