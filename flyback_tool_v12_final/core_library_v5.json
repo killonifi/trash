@@ -11,7 +11,8 @@
       "le_mm": 70.4,
       "Ve_mm3": 5350.0,
       "Aw_mm2": 97.0,
-      "AL_nH_per_turn2_ungapped": 2200.0
+      "AL_nH_per_turn2_ungapped": 2200.0,
+      "Bmax_T": 0.2
     },
     {
       "vendor": "EPCOS/TDK",
@@ -24,7 +25,8 @@
       "le_mm": 57.5,
       "Ve_mm3": 3020.0,
       "Aw_mm2": 61.0,
-      "AL_nH_per_turn2_ungapped": 1850.0
+      "AL_nH_per_turn2_ungapped": 1850.0,
+      "Bmax_T": 0.2
     },
     {
       "vendor": "EPCOS/TDK",
@@ -37,7 +39,8 @@
       "le_mm": 57.0,
       "Ve_mm3": 3310.0,
       "Aw_mm2": null,
-      "AL_nH_per_turn2_ungapped": 2000.0
+      "AL_nH_per_turn2_ungapped": 2000.0,
+      "Bmax_T": 0.2
     },
     {
       "vendor": "Shinhom",
@@ -50,7 +53,8 @@
       "le_mm": 57.0,
       "Ve_mm3": 3310.0,
       "Aw_mm2": null,
-      "AL_nH_per_turn2_ungapped": 2000.0
+      "AL_nH_per_turn2_ungapped": 2000.0,
+      "Bmax_T": 0.2
     }
   ]
 }

@@ -30,6 +30,34 @@ def parse_num(s):
 def rho_cu_at(Tc: float) -> float:
     return RHO_CU_20 * (1.0 + ALPHA_CU * (Tc - 20.0))
 
+# Simple AWG table: (gauge, area_mm2)
+AWG_TABLE = [
+    (10, 5.26), (11, 4.17), (12, 3.31), (13, 2.62), (14, 2.08),
+    (15, 1.65), (16, 1.31), (17, 1.04), (18, 0.823), (19, 0.653),
+    (20, 0.519), (21, 0.412), (22, 0.326), (23, 0.258), (24, 0.205),
+    (25, 0.162), (26, 0.129), (27, 0.102), (28, 0.0810), (29, 0.0642),
+    (30, 0.0509), (31, 0.0404), (32, 0.0320), (33, 0.0254), (34, 0.0201),
+    (35, 0.0160), (36, 0.0127), (37, 0.0100), (38, 0.00797),
+    (39, 0.00632), (40, 0.0050)
+]
+
+def select_awg(area_req: float) -> Dict[str, float]:
+    """Pick AWG size and number of parallels so total area ≥ area_req, strands ≤5."""
+    best = None
+    for gauge, area in AWG_TABLE:
+        n = max(1, math.ceil(area_req / area))
+        if n > 5:
+            continue
+        excess = n * area - area_req
+        if best is None or excess < best[4]:
+            best = (gauge, area, n, n * area, excess)
+    if best is None:
+        gauge, area = AWG_TABLE[-1]
+        n = min(5, math.ceil(area_req / area))
+        best = (gauge, area, n, n * area, n * area - area_req)
+    gauge, area, n, total, _ = best
+    return {"awg": f"AWG{gauge}", "awg_area_mm2": area, "parallel": n, "total_area_mm2": total}
+
 @dataclass
 class OutputSpec:
     name: str
@@ -63,6 +91,7 @@ class FlybackInput:
     f_line: float = 50.0
     overload: float = 1.2
     main_output: str = ""
+    force_dcm: bool = False
 
 @dataclass
 class Geometry:
@@ -140,7 +169,7 @@ class RefinedDesign:
     dcm_ok_main: bool
     t_off_main_s: float
     lsec_main_H: float
-    wires: Dict[str, Dict[str, float]]
+    wires: Dict[str, Any]
     vds_ideal_V: float
     vds_with_overhead_V: float
     diode_vrrm_ideal_each_V: Dict[str, float]
@@ -179,13 +208,16 @@ def estimate_initial_design(fin: FlybackInput, outputs: List[OutputSpec], cin_vr
     for o in outputs:
         k_i = vref / (o.v + o.diode_drop)
         diode_vrrm_each[o.name] = k_i * fin.vin_max + o.v + o.diode_drop
-        cout_each[o.name] = (o.i * (1.0 - dmin)) / (max(1e-6, o.ripple_v) * fin.fsw)
+        # Cout ≈ Iout*(1-D)/(2*ΔV*f_sw) for DCM flyback
+        cout_each[o.name] = (o.i * (1.0 - dmin)) / (2.0 * max(1e-6, o.ripple_v) * fin.fsw)
         per_out[o.name] = {"k_np_over_ns_ideal": k_i, "cout_min_F": cout_each[o.name], "diode_vrrm_ideal_V": diode_vrrm_each[o.name]}
 
     if fin.input_type.lower() == "dc":
+        # C_in ≥ I_in*D/(ΔV*fsw) -- from charge balance in continuous input current
         iin = pout / (fin.eff * fin.vin_min)
         cin_min = iin * dmin / (max(1e-6, cin_vrip) * fin.fsw)
     else:
+        # For rectified mains: C_in ≥ P/(η*ΔV*2*f_line)
         cin_min = pout / (fin.eff * max(1e-3, cin_vrip) * 2.0 * fin.f_line)
 
     d_vin_min = dmin
@@ -200,15 +232,24 @@ def estimate_initial_design(fin: FlybackInput, outputs: List[OutputSpec], cin_vr
     )
 
 def skin_depth_mm(f_hz: float) -> float:
-    return 1e3 * (2.0 * RHO_CU_20 / (2.0 * math.pi * f_hz * MU0)) ** 0.5
+    """Return copper skin depth in millimeters for frequency ``f_hz``."""
+    numerator = 2.0 * RHO_CU_20
+    denominator = 2.0 * math.pi * f_hz * MU0
+    return 1e3 * math.sqrt(numerator / denominator)
 
-def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
-                     ini: InitialDesign, outputs: List[OutputSpec],
-                     rcd: Optional[RCDClamp]=None,
-                     stein: Optional[Steinmetz]=None,
-                     mosfet: Optional[MosfetParams]=None) -> RefinedDesign:
+
+def refine_with_core(
+    fin: FlybackInput,
+    geom: Geometry,
+    core: CoreParameters,
+    ini: InitialDesign,
+    outputs: List[OutputSpec],
+    rcd: Optional[RCDClamp] = None,
+    stein: Optional[Steinmetz] = None,
+    mosfet: Optional[MosfetParams] = None,
+    force_dcm: bool = False,
+) -> RefinedDesign:
     Ae = core.ae_mm2 * 1e-6
-    # Minimum turns from ΔB
     Duse = ini.d_vin_min
     np_min = math.ceil((fin.vin_max * Duse) / (core.bmax_T * Ae * fin.fsw))
     np_turns = int(np_min)
@@ -216,41 +257,36 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
     main_name = fin.main_output or outputs[0].name
     main = next(o for o in outputs if o.name == main_name)
 
-    # Ns per output from ideal K rounding
-    ns_turns: Dict[str,int] = {}
-    for o in outputs:
-        k_ideal = ini.per_output[o.name]["k_np_over_ns_ideal"]
-        ns_turns[o.name] = max(1, int(round(np_turns / max(k_ideal, 1e-12))))
-
-    k_act = np_turns / ns_turns[main_name]
-
-    # Air gap for target Lm
-    gap = MU0 * (np_turns**2) * Ae / max(ini.lm_target_H, 1e-18)
-    lm_actual = MU0 * (np_turns**2) * Ae / gap
-
-    # Currents
-    ipk = (fin.vin_min * ini.d_vin_min) / (lm_actual * fin.fsw)
-    irms_pri = ipk * (ini.d_vin_min/3.0) ** 0.5
-
-    # Secondary (main)
-    lsec_main = lm_actual * (ns_turns[main_name]/np_turns)**2
-    ipk_sec_main = ipk * k_act
-    toff = lsec_main * ipk_sec_main / (main.v + main.diode_drop)
     period = 1.0 / fin.fsw
-    dcm_ok = toff <= (1.0 - ini.d_vin_min) * period + 1e-15
+    while True:
+        ns_turns: Dict[str,int] = {}
+        for o in outputs:
+            k_ideal = ini.per_output[o.name]["k_np_over_ns_ideal"]
+            ns_turns[o.name] = max(1, int(round(np_turns / max(k_ideal, 1e-12))))
 
-    # Wires (simple)
+        k_act = np_turns / ns_turns[main_name]
+        gap = MU0 * (np_turns**2) * Ae / max(ini.lm_target_H, 1e-18)
+        lm_actual = MU0 * (np_turns**2) * Ae / gap
+        ipk = (fin.vin_min * ini.d_vin_min) / (lm_actual * fin.fsw)
+        irms_pri = ipk * (ini.d_vin_min/3.0) ** 0.5
+        lsec_main = lm_actual * (ns_turns[main_name]/np_turns)**2
+        ipk_sec_main = ipk * k_act
+        toff = lsec_main * ipk_sec_main / (main.v + main.diode_drop)
+        dcm_ok = toff <= (1.0 - ini.d_vin_min) * period + 1e-15
+        if not force_dcm or dcm_ok or np_turns>1000:
+            break
+        np_turns += 1
+
+    # Wires with AWG selection
     delta = skin_depth_mm(fin.fsw)
-    def strands_for(d, delta):
-        if d <= 2.0*delta: return 1
-        strand_d = max(0.02, 2.0*delta)
-        return max(1, int(math.ceil((d/strand_d)**2)))
     wires: Dict[str, Dict[str,float]] = {}
     area_pri = irms_pri / geom.jmax_A_per_mm2
-    dia_pri = (4.0 * area_pri / math.pi) ** 0.5
+    sel_pri = select_awg(area_pri)
     wires["primary_area_mm2"] = area_pri
-    wires["primary_dia_mm"] = dia_pri
-    wires["primary_strands"] = strands_for(dia_pri, delta)
+    wires["primary_awg"] = sel_pri["awg"]
+    wires["primary_awg_area_mm2"] = sel_pri["awg_area_mm2"]
+    wires["primary_parallel"] = sel_pri["parallel"]
+    wires["primary_total_area_mm2"] = sel_pri["total_area_mm2"]
     wires["skin_depth_mm"] = delta
 
     irms_sec_map: Dict[str,float] = {}
@@ -260,10 +296,12 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
         irms_sec = ipk_sec * ((1.0 - ini.d_vin_min)/3.0) ** 0.5
         irms_sec_map[o.name] = irms_sec
         area_sec = irms_sec / geom.jmax_A_per_mm2
-        dia_sec = (4.0 * area_sec / math.pi) ** 0.5
+        sel = select_awg(area_sec)
         wires[f"{o.name}_area_mm2"] = area_sec
-        wires[f"{o.name}_dia_mm"] = dia_sec
-        wires[f"{o.name}_strands"] = strands_for(dia_sec, delta)
+        wires[f"{o.name}_awg"] = sel["awg"]
+        wires[f"{o.name}_awg_area_mm2"] = sel["awg_area_mm2"]
+        wires[f"{o.name}_parallel"] = sel["parallel"]
+        wires[f"{o.name}_total_area_mm2"] = sel["total_area_mm2"]
 
     # Voltages and clamp
     vds_ideal = fin.vin_max + k_act * (main.v + main.diode_drop)
@@ -293,7 +331,7 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
     # Fill factor
     fill_factor = None
     if geom.window_area_mm2:
-        total_cu = wires["primary_area_mm2"] + sum(wires[f"{o.name}_area_mm2"] for o in outputs)
+        total_cu = wires["primary_total_area_mm2"] + sum(wires[f"{o.name}_total_area_mm2"] for o in outputs)
         fill_factor = 1.2 * total_cu / geom.window_area_mm2
 
     # Losses
@@ -302,7 +340,7 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
         return RHO_CU_20 * (1.0 + ALPHA_CU * (Tc - 20.0))
     rho = rho_cu_at(geom.copper_temp_C)
     l_pri_m = (geom.mlt_pri_mm * 1e-3) * np_turns
-    A_pri_m2 = wires["primary_area_mm2"] * 1e-6
+    A_pri_m2 = wires["primary_total_area_mm2"] * 1e-6
     Rdc_pri = rho * l_pri_m / max(1e-12, A_pri_m2)
     Pcu_pri = (irms_pri**2) * Rdc_pri * geom.ac_factor_pri
     losses["Rdc_pri_Ohm"] = Rdc_pri
@@ -312,7 +350,7 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
     for o in outputs:
         ns = ns_turns[o.name]
         l_sec_m = ((o.mlt_mm if o.mlt_mm else geom.mlt_sec_default_mm) * 1e-3) * ns
-        A_sec_m2 = wires[f"{o.name}_area_mm2"] * 1e-6
+        A_sec_m2 = wires[f"{o.name}_total_area_mm2"] * 1e-6
         Rdc_sec = rho * l_sec_m / max(1e-12, A_sec_m2)
         irms_sec = irms_sec_map[o.name]
         Pcu_sec = (irms_sec**2) * Rdc_sec * geom.ac_factor_sec
@@ -372,14 +410,15 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
 def sweep_k(fin: FlybackInput, outputs: List[OutputSpec], geom: Geometry, core: CoreParameters,
             rcd: Optional[RCDClamp]=None, stein: Optional[Steinmetz]=None, mosfet: Optional[MosfetParams]=None,
             criterion: str = "min_vds", dmin: float = 0.2, dmax: float = 0.5, dstep: float = 0.02,
-            cin_vrip: float = 5.0) -> Dict[str, Any]:
+            cin_vrip: float = 5.0, force_dcm: bool=False) -> Dict[str, Any]:
     main_name = fin.main_output or outputs[0].name
     grid = []
     best = None
     for D in [dmin + i*dstep for i in range(int((dmax-dmin)/dstep)+1)]:
         vref = (D/(1.0-D)) * fin.vin_min
         ini = estimate_initial_design(fin, outputs, cin_vrip=cin_vrip, vref_override=vref)
-        ref = refine_with_core(fin, geom, core, ini, outputs, rcd=rcd, stein=stein, mosfet=mosfet)
+        ref = refine_with_core(fin, geom, core, ini, outputs, rcd=rcd, stein=stein, mosfet=mosfet,
+                               force_dcm=force_dcm)
         vds = ref.vds_with_overhead_V
         ipk = ref.ipk_new_A
         vrrm_max = max(ref.diode_vrrm_required_each_V.values())
@@ -398,13 +437,25 @@ def normalize_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if "input" in cfg:
         for k in ["vin_min","vin_max","fsw","duty_max","eff","f_line","overload"]:
             if k in cfg["input"]: cfg["input"][k] = p(cfg["input"][k])
+        if "force_dcm" in cfg["input"]:
+            v = cfg["input"]["force_dcm"]
+            if isinstance(v, str):
+                cfg["input"]["force_dcm"] = v.strip().lower() in ("1","true","yes","on")
+            else:
+                cfg["input"]["force_dcm"] = bool(v)
     if "outputs" in cfg:
         for o in cfg["outputs"]:
             for k in ["v","i","ripple_v","diode_drop","mlt_mm","qrr_nC"]:
                 if k in o: o[k] = p(o[k])
     if "core" in cfg:
+        core = cfg["core"]
+        if "Bmax_T" in core and "bmax_T" not in core:
+            core["bmax_T"] = core.pop("Bmax_T")
+        if "Bmax" in core and "bmax_T" not in core:
+            core["bmax_T"] = core.pop("Bmax")
         for k in ["ae_mm2","le_mm","bmax_T","al_nH_per_turn2","core_volume_mm3"]:
-            if k in cfg["core"]: cfg["core"][k] = p(cfg["core"][k])
+            if k in core:
+                core[k] = p(core[k])
     if "geometry" in cfg:
         for k in ["jmax_A_per_mm2","mlt_pri_mm","mlt_sec_default_mm","window_area_mm2","copper_temp_C","ac_factor_pri","ac_factor_sec"]:
             if k in cfg["geometry"]: cfg["geometry"][k] = p(cfg["geometry"][k])
@@ -449,14 +500,16 @@ def run(cfg: Dict[str, Any], corelib: Optional[Dict[str, Any]] = None) -> Dict[s
             crit = kcfg.get("criterion","min_vds")
             dmin = float(kcfg.get("dmin",0.2)); dmax=float(kcfg.get("dmax",0.5)); dstep=float(kcfg.get("dstep",0.02))
             sweep = sweep_k(fin, outs, geom, core, rcd=rcd, stein=stein, mosfet=mosfet, criterion=crit,
-                            dmin=dmin, dmax=dmax, dstep=dstep, cin_vrip=cin_vrip)
+                            dmin=dmin, dmax=dmax, dstep=dstep, cin_vrip=cin_vrip,
+                            force_dcm=fin.force_dcm)
             res["k_sweep"] = {"criterion": crit, "best": {"D": sweep["best"]["D"], "metric": sweep["best"]["metric"]},
                               "grid_len": len(sweep["grid"])}
             best_ini = sweep["best"]["ini"]; best_ref = sweep["best"]["ref"]
             res["initial"] = asdict(best_ini)
             res["refined"] = asdict(best_ref)
         else:
-            ref = refine_with_core(fin, geom, core, ini, outs, rcd=rcd, stein=stein, mosfet=mosfet)
+            ref = refine_with_core(fin, geom, core, ini, outs, rcd=rcd, stein=stein, mosfet=mosfet,
+                                   force_dcm=fin.force_dcm)
             res["refined"] = asdict(ref)
 
     if corelib:
