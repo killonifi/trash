@@ -41,43 +41,42 @@ AWG_TABLE = [
     (39, 0.00632), (40, 0.0050)
 ]
 
-def select_awg(area_req: float, delta_mm: Optional[float] = None) -> Dict[str, float]:
-    """Pick an AWG size and number of parallels so total area ≥ area_req.
+def select_awg(area_req: float, delta_mm: Optional[float] = None,
+               max_parallel: int = 5) -> Dict[str, float]:
+    """Pick an AWG size and number of parallels so total area ≥ ``area_req``.
 
-    If ``delta_mm`` is provided, only gauges whose diameter does not exceed
-    ``2*delta_mm`` are considered first, thus favouring thinner strands that
-    reduce skin‑effect losses.  The search always restricts the number of
-    parallel wires to at most five; if no suitable combination is found within
-    the skin‑depth limit, the full table is searched as a fall‑back.
+    If ``delta_mm`` is given the function first searches gauges whose individual
+    strand diameter is **strictly** less than ``2*delta_mm`` while using no more
+    than ``max_parallel`` parallels (default 5). If no such combination can
+    provide the required copper area, the skin‑depth constraint is dropped and
+    the best match is chosen from the full AWG table, still observing the
+    ``max_parallel`` limit.
     """
 
-    def eval_table(table):
-        best = None  # (gauge, area, n, total)
-        for gauge, area in table:
-            n = max(1, math.ceil(area_req / area))
-            if n > 5:
-                continue
-            total = n * area
-            if best is None or (n < best[2]) or (n == best[2] and total < best[3]):
-                best = (gauge, area, n, total)
-        return best
+    def find_best(table):
+        for gauge, area in reversed(table):  # iterate from thinnest to thickest
+            n = math.ceil(area_req / area)
+            if n <= max_parallel:
+                total = n * area
+                return gauge, area, n, total
+        return None
 
-    table = AWG_TABLE
     if delta_mm is not None:
         limit = 2.0 * delta_mm
-        table = [
+        table_skin = [
             (g, a) for g, a in AWG_TABLE
-            if math.sqrt(4.0 * a / math.pi) <= limit
+            if math.sqrt(4.0 * a / math.pi) < limit
         ]
-        best = eval_table(table)
-        if best is None:
-            best = eval_table(AWG_TABLE)
-    else:
-        best = eval_table(AWG_TABLE)
+        best = find_best(table_skin)
+        if best is not None:
+            gauge, area, n, total = best
+            return {"awg": f"AWG{gauge}", "awg_area_mm2": area,
+                    "parallel": n, "total_area_mm2": total}
 
+    best = find_best(AWG_TABLE)
     if best is None:
-        gauge, area = AWG_TABLE[-1]
-        n = min(5, math.ceil(area_req / area))
+        gauge, area = AWG_TABLE[0]
+        n = max_parallel
         total = n * area
         best = (gauge, area, n, total)
 
