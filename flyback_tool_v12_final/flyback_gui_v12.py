@@ -20,7 +20,7 @@ try:
 except Exception as e:
     HAVE_CORE = False
     IMPORT_ERR = str(e)
-LIB_DEFAULT = "core_library_v8.json"
+LIB_DEFAULT = "core_library_v5.json"
 class Tooltip(tk.Toplevel):
     def __init__(self, widget, text="", **kw):
         super().__init__(widget, **kw)
@@ -63,7 +63,7 @@ class App(tk.Tk):
         nb = ttk.Notebook(self); nb.pack(fill="both", expand=True)
         self.nb = nb
         self.model: Dict[str, Any] = {
-            "input": {"vin_min":"90","vin_max":"265","fsw":"100k","duty_max":"0.45","eff":"0.88","input_type":"dc","f_line":"50","overload":"1.2","main_output":"","cin_vrip":"5"},
+            "input": {"vin_min":"90","vin_max":"265","fsw":"100k","duty_max":"0.45","eff":"0.88","input_type":"dc","f_line":"50","overload":"1.2","main_output":"","cin_vrip":"5","force_dcm": False},
             "outputs": [{"name":"12V","v":"12","i":"5","ripple_v":"0.06","diode_drop":"0.5","mlt_mm":"40"}],
             "core": {"ae_mm2":"58","le_mm":"57","bmax_T":"0.20","core_volume_mm3":"3310"},
             "geometry": {"jmax_A_per_mm2":"4.0","mlt_pri_mm":"40","mlt_sec_default_mm":"40","window_area_mm2":"70","copper_temp_C":"60","ac_factor_pri":"1.5","ac_factor_sec":"1.5"},
@@ -98,10 +98,12 @@ class App(tk.Tk):
         self.config(menu=m)
     def build_inputs_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Inputs")
-        self.inputs_vars = {k: tk.StringVar(value=str(self.model["input"].get(k,""))) for k in self.model["input"].keys()}
+        input_keys = [k for k in self.model["input"].keys() if k not in ("force_dcm",)]
+        self.inputs_vars = {k: tk.StringVar(value=str(self.model["input"].get(k,""))) for k in input_keys}
         # ensure cin_vrip present in inputs_vars
         if "cin_vrip" in self.model:
             self.inputs_vars["cin_vrip"] = tk.StringVar(value=str(self.model.get("cin_vrip","")))
+        self.force_dcm_var = tk.BooleanVar(value=bool(self.model["input"].get("force_dcm", False)))
         grid = ttk.Frame(tab, padding=10); grid.pack(fill="both", expand=True)
         labels=[("Vin_min [V]","vin_min"),("Vin_max [V]","vin_max"),("fsw [Hz]","fsw"),("Dmax","duty_max"),
                 ("eff","eff"),("input_type (dc/ac)","input_type"),("f_line [Hz]","f_line"),
@@ -111,6 +113,7 @@ class App(tk.Tk):
             ttk.Label(grid, text=lbl).grid(row=row, column=0, sticky="w", pady=3)
             ttk.Entry(grid, textvariable=self.inputs_vars[key], width=20).grid(row=row, column=1, sticky="w", pady=3)
             row+=1
+        ttk.Checkbutton(grid, text="Force DCM", variable=self.force_dcm_var).grid(row=row, column=0, sticky="w", pady=3)
     def build_outputs_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Outputs")
         frm = ttk.Frame(tab, padding=10); frm.pack(fill="both", expand=True)
@@ -207,12 +210,12 @@ class App(tk.Tk):
         ttk.Button(top, text="Load library...", command=self.load_library).pack(side="left")
         ttk.Button(top, text="Use selected", command=self.use_selected_core).pack(side="left", padx=6)
         ttk.Label(top, text="(double-click row to apply)").pack(side="left", padx=6)
-        cols=("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","AL_nH_per_turn2_ungapped")
+        cols=("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped")
         self.core_tree = ttk.Treeview(tab, columns=cols, show="headings")
         for c in cols:
             self.core_tree.heading(c, text=c)
             w = 120 if c in ("distributor_sku","size") else 90
-            if c in ("Ae_mm2","le_mm","Ve_mm3","Aw_mm2","AL_nH_per_turn2_ungapped"): w=110
+            if c in ("Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped"): w=110
             self.core_tree.column(c, width=w, anchor="center")
         self.core_tree.pack(fill="both", expand=True, padx=6, pady=6)
         self.core_tree.bind("<Double-1>", lambda e: self.use_selected_core())
@@ -231,7 +234,7 @@ class App(tk.Tk):
             if self.tooltip: self.tooltip.destroy(); self.tooltip=None
             return
         vals = self.core_tree.item(iid, "values")
-        text = ("Поставщик: %s\nАртикул: %s\nПроизводитель: %s\nСерия: %s  Размер: %s  Материал: %s\nAe= %s мм², le= %s мм, Ve= %s мм³, Aw= %s мм², AL≈ %s нГн/вит²" % (vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7], vals[8], vals[9], vals[10]))
+        text = ("Поставщик: %s\nАртикул: %s\nПроизводитель: %s\nСерия: %s  Размер: %s  Материал: %s\nAe= %s мм², le= %s мм, Ve= %s мм³, Aw= %s мм², Bmax= %s Т, AL≈ %s нГн/вит²" % (vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7], vals[8], vals[9], vals[10], vals[11]))
         if self.tooltip: self.tooltip.destroy()
         self.tooltip = Tooltip(self.core_tree, text=text)
         x=self.core_tree.winfo_rootx()+event.x+20
@@ -241,7 +244,7 @@ class App(tk.Tk):
         sel = self.core_tree.selection()
         if not sel: return
         vals = self.core_tree.item(sel[0], "values")
-        mapping = {"ae_mm2": vals[6], "le_mm": vals[7], "al_nH_per_turn2": vals[10]}
+        mapping = {"ae_mm2": vals[6], "le_mm": vals[7], "bmax_T": vals[10], "al_nH_per_turn2": vals[11]}
         for k,v in mapping.items():
             if k in self.core_vars: self.core_vars[k].set(str(v))
         if vals[8]:
@@ -274,6 +277,7 @@ class App(tk.Tk):
     def collect_cfg(self) -> Dict[str, Any]:
         inp = {k: v.get() for k,v in self.inputs_vars.items()}
         cin_vrip = inp.pop("cin_vrip","5.0")
+        inp["force_dcm"] = bool(self.force_dcm_var.get())
         outs=[]
         for iid in self.tree.get_children():
             vals = self.tree.item(iid,"values")
@@ -315,7 +319,9 @@ class App(tk.Tk):
             rcd = RCDClamp(**cfg_norm["rcd"]) if "rcd" in cfg_norm else None
             crit = self.k_vars["criterion"].get()
             dmin=float(self.k_vars["dmin"].get()); dmax=float(self.k_vars["dmax"].get()); dstep=float(self.k_vars["dstep"].get())
-            sweep = sweep_k(fin, outs, geom, core, rcd=rcd, stein=stein, mosfet=mos, criterion=crit, dmin=dmin, dmax=dmax, dstep=dstep, cin_vrip=cfg_norm.get("cin_vrip",5.0))
+            sweep = sweep_k(fin, outs, geom, core, rcd=rcd, stein=stein, mosfet=mos, criterion=crit,
+                             dmin=dmin, dmax=dmax, dstep=dstep, cin_vrip=cfg_norm.get("cin_vrip",5.0),
+                             force_dcm=fin.force_dcm)
             lines = []
             lines.append(f"Criterion: {crit}")
             lines.append("D     Vref[V]   K_ideal  Vds[V]   Ipk[A]  VRRM_max[V]  Ploss[W]")
@@ -342,7 +348,7 @@ class App(tk.Tk):
             for iid in self.core_tree.get_children():
                 self.core_tree.delete(iid)
             for it in data.get("cores", []):
-                vals = [it.get(k,"") for k in ("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","AL_nH_per_turn2_ungapped")]
+                vals = [it.get(k,"") for k in ("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped")]
                 self.core_tree.insert("", "end", values=vals)
         except Exception as e:
             messagebox.showerror("Library", str(e))
@@ -387,10 +393,16 @@ class App(tk.Tk):
                 rc = r['rcd']
                 lines.append(f"RCD clamp: Vclamp = {rc['Vclamp_V']:.1f} V; C = {rc['C_snub_F']:.3e} F; R = {rc['R_snub_Ohm']:.1f} Ω; P_snub = {rc['P_lk_W']:.2f} W")
             lines.append("--- ПРОВОДНИКИ ---")
-            lines.append(f"A_cu_primary = {r['wires']['primary_area_mm2']:.6f} мм^2; d_eq = {r['wires']['primary_dia_mm']:.3f} мм; strands = {int(r['wires']['primary_strands'])}")
+            lines.append(
+                f"A_cu_primary = {r['wires']['primary_area_mm2']:.6f} мм^2 -> {r['wires']['primary_awg']}"
+                f" ({r['wires']['primary_awg_area_mm2']:.3f} мм^2) x{int(r['wires']['primary_parallel'])}"
+            )
             for o in res["outputs"]:
                 name = o["name"]
-                lines.append(f"A_cu_sec[{name}] = {r['wires'][name+'_area_mm2']:.6f} мм^2; d_eq = {r['wires'][name+'_dia_mm']:.3f} мм; strands = {int(r['wires'][name+'_strands'])}")
+                lines.append(
+                    f"A_cu_sec[{name}] = {r['wires'][name+'_area_mm2']:.6f} мм^2 -> {r['wires'][name+'_awg']}"
+                    f" ({r['wires'][name+'_awg_area_mm2']:.3f} мм^2) x{int(r['wires'][name+'_parallel'])}"
+                )
             if r["fill_factor"] is not None:
                 lines.append(f"Fill-factor ≈ {r['fill_factor']:.2f}")
             lines.append("")
