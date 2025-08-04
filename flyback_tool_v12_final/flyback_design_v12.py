@@ -42,13 +42,13 @@ AWG_TABLE = [
 ]
 
 def select_awg(area_req: float, delta_mm: Optional[float] = None) -> Dict[str, float]:
-    """Pick an AWG size and number of parallels so total area ≥ area_req.
+    """Pick an AWG size and number of parallels so total area ≥ ``area_req``.
 
-    If ``delta_mm`` is provided, only gauges whose diameter does not exceed
-    ``2*delta_mm`` are considered first, thus favouring thinner strands that
-    reduce skin‑effect losses.  The search always restricts the number of
+    If ``delta_mm`` is provided, only gauges whose diameter is strictly less
+    than ``2*delta_mm`` are considered first, favouring thinner strands that
+    mitigate skin-effect losses. The search always restricts the number of
     parallel wires to at most five; if no suitable combination is found within
-    the skin‑depth limit, the full table is searched as a fall‑back.
+    the skin-depth limit, the full table is searched as a fall-back.
     """
 
     def eval_table(table):
@@ -67,7 +67,7 @@ def select_awg(area_req: float, delta_mm: Optional[float] = None) -> Dict[str, f
         limit = 2.0 * delta_mm
         table = [
             (g, a) for g, a in AWG_TABLE
-            if math.sqrt(4.0 * a / math.pi) <= limit
+            if math.sqrt(4.0 * a / math.pi) < limit
         ]
         best = eval_table(table)
         if best is None:
