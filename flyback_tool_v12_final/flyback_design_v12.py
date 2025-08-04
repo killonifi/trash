@@ -233,9 +233,7 @@ def estimate_initial_design(fin: FlybackInput, outputs: List[OutputSpec], cin_vr
 
 def skin_depth_mm(f_hz: float) -> float:
     """Return copper skin depth in millimeters for frequency ``f_hz``."""
-    numerator = 2.0 * RHO_CU_20
-    denominator = 2.0 * math.pi * f_hz * MU0
-    return 1e3 * math.sqrt(numerator / denominator)
+    return 1e3 * math.sqrt(2.0 * RHO_CU_20 / (2.0 * math.pi * f_hz * MU0))
 
 
 def refine_with_core(
