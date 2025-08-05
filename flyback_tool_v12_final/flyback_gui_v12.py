@@ -20,7 +20,7 @@ try:
 except Exception as e:
     HAVE_CORE = False
     IMPORT_ERR = str(e)
-LIB_DEFAULT = "core_library_v5.json"
+LIB_DEFAULT = "core_library_v5_with_waveforms.json"
 class Tooltip(tk.Toplevel):
     def __init__(self, widget, text="", **kw):
         super().__init__(widget, **kw)
@@ -263,6 +263,7 @@ class App(tk.Tk):
         ttk.Label(top, text="(double-click row to apply)").pack(side="left", padx=6)
         cols=("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped")
         self.core_cols = cols
+        self.core_items: Dict[str, Any] = {}
         table = ttk.Frame(tab)
         table.pack(fill="both", expand=True, padx=6, pady=6)
         self.core_tree = ttk.Treeview(table, columns=cols, show="headings")
@@ -287,7 +288,8 @@ class App(tk.Tk):
                 data = json.load(open(LIB_DEFAULT, "r", encoding="utf-8"))
                 for it in data.get("cores", []):
                     vals = ["" if it.get(k) is None else str(it.get(k)) for k in self.core_cols]
-                    self.core_tree.insert("", "end", values=vals)
+                    iid = self.core_tree.insert("", "end", values=vals)
+                    self.core_items[iid] = it
             except Exception as e:
                 messagebox.showwarning("Library", str(e))
     def on_core_hover(self, event):
@@ -305,12 +307,22 @@ class App(tk.Tk):
     def use_selected_core(self):
         sel = self.core_tree.selection()
         if not sel: return
-        vals = self.core_tree.item(sel[0], "values")
+        iid = sel[0]
+        vals = self.core_tree.item(iid, "values")
         mapping = {"ae_mm2": vals[6], "le_mm": vals[7], "bmax_T": vals[10], "al_nH_per_turn2": vals[11]}
-        for k,v in mapping.items():
-            if k in self.core_vars: self.core_vars[k].set(str(v))
-        if vals[8]:
-            self.core_vars["core_volume_mm3"].set(str(vals[8]))
+        for k, v in mapping.items():
+            if k in self.core_vars:
+                self.core_vars[k].set(str(v))
+        item = self.core_items.get(iid, {})
+        ve = item.get("Ve_mm3")
+        if ve is not None:
+            self.core_vars["core_volume_mm3"].set(str(ve))
+        st = item.get("steinmetz")
+        if isinstance(st, dict):
+            for k in ["k", "alpha", "beta"]:
+                v = st.get(k)
+                if v is not None and k in self.st_vars:
+                    self.st_vars[k].set(str(v))
     def build_results_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Results")
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
@@ -428,11 +440,13 @@ class App(tk.Tk):
         if not path: return
         try:
             data = json.load(open(path,"r",encoding="utf-8"))
+            self.core_items.clear()
             for iid in self.core_tree.get_children():
                 self.core_tree.delete(iid)
             for it in data.get("cores", []):
                 vals = ["" if it.get(k) is None else str(it.get(k)) for k in self.core_cols]
-                self.core_tree.insert("", "end", values=vals)
+                iid = self.core_tree.insert("", "end", values=vals)
+                self.core_items[iid] = it
         except Exception as e:
             messagebox.showerror("Library", str(e))
     def show_results(self, res: Dict[str, Any]):
