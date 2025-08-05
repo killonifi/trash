@@ -8,7 +8,8 @@
     "input_type": "dc",
     "f_line": 50,
     "overload": 1.2,
-    "main_output": "12V"
+    "main_output": "12V",
+    "cin_vrip": 5.0
   },
   "outputs": [
     {
@@ -44,6 +45,7 @@
     "margin": 0.1
   },
   "mosfet": {
+    "vds_V": 600,
     "rds_on_mohm": 120,
     "rds_temp_C": 100,
     "rds_temp_coeff": 0.004,
@@ -60,7 +62,6 @@
     "alpha": 1.25,
     "beta": 2.4
   },
-  "cin_vrip": 5.0,
   "k_optimize": {
     "criterion": "min_loss",
     "dmin": 0.22,
