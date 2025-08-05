@@ -332,7 +332,7 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
         k_i = np_turns / ns_turns[o.name]
         vrrm = fin.vin_max / k_i + o.v
         diode_vrrm_ideal_each[o.name] = vrrm
-        diode_vrrm_required_each[o.name] = vrrm * 1.15
+        diode_vrrm_required_each[o.name] = vrrm
 
     rcd_info = None
     if rcd and rcd.enable:
