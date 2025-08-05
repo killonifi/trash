@@ -194,6 +194,7 @@ class RefinedDesign:
     dcm_ok_main: bool
     t_off_main_s: float
     lsec_main_H: float
+    delta_B_T: float
     wires: Dict[str, Any]
     vds_ideal_V: float
     vds_with_overhead_V: float
@@ -291,6 +292,9 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
             break
         np_turns += 1
 
+    # Flux swing (ΔB)
+    dB = (fin.vin_max * ini.d_vin_min) / (np_turns * Ae * fin.fsw)
+
     # Wires with AWG selection
     delta = skin_depth_mm(fin.fsw)
     wires: Dict[str, Dict[str,float]] = {}
@@ -376,7 +380,6 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
 
     p_core_W = None
     if core.core_volume_mm3 and stein:
-        dB = (fin.vin_max * ini.d_vin_min) / (np_turns * Ae * fin.fsw)
         Pv = stein.k * (fin.fsw**stein.alpha) * (dB**stein.beta)
         vol_m3 = core.core_volume_mm3 * 1e-9
         p_core_W = Pv * vol_m3
@@ -419,7 +422,7 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
         np_turns=np_turns, ns_turns=ns_turns, k_actual_np_over_ns_main=k_act,
         gap_m=gap, lm_actual_H=lm_actual, ipk_new_A=ipk, irms_pri_new_A=irms_pri,
         dcm_ok_main=dcm_ok, t_off_main_s=toff, lsec_main_H=lsec_main,
-        wires=wires, vds_ideal_V=vds_ideal, vds_with_overhead_V=vds_required,
+        delta_B_T=dB, wires=wires, vds_ideal_V=vds_ideal, vds_with_overhead_V=vds_required,
         diode_vrrm_ideal_each_V=diode_vrrm_ideal_each, diode_vrrm_required_each_V=diode_vrrm_required_each,
         fill_factor=fill_factor, rcd=rcd_info, core_loss_W=p_core_W, losses=losses, notes=notes
     )
@@ -442,7 +445,8 @@ def sweep_k(fin: FlybackInput, outputs: List[OutputSpec], geom: Geometry, core: 
         vrrm_max = max(vrrm_each.values())
         loss = ref.losses.get("Ptotal_W", float("inf"))
         metric = {"min_vds": vds, "min_ipk": ipk, "min_vrrm": vrrm_max, "min_loss": loss}.get(criterion, vds)
-        row = {"D": D, "Vref": vref, "K": ini.k_np_over_ns, "Vds": vds, "Ipk": ipk, "Ploss": loss, "VRRM_max": vrrm_max,
+        row = {"D": D, "Vref": vref, "K": ini.k_np_over_ns, "Vds": vds, "Ipk": ipk,
+               "dB_T": ref.delta_B_T, "Ploss": loss, "VRRM_max": vrrm_max,
                "ini": asdict(ini), "ref": asdict(ref)}
         for name, v in vrrm_each.items():
             row[f"VRRM_{name}"] = v
