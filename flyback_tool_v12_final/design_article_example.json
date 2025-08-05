@@ -56,6 +56,7 @@
   },
   "steinmetz": {
     "k": 2.8,
+    "k_unit": "W/kg",
     "alpha": 1.25,
     "beta": 2.4
   },

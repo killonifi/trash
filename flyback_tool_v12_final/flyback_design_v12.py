@@ -7,12 +7,13 @@ Flyback converter design tool (v12, DCM)
 - Multi-outputs; losses: copper, core (Steinmetz), MOSFET, diodes; clamp (RCD)
 """
 import json, math, sys, os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import List, Optional, Dict, Any
 
 MU0 = 4*math.pi*1e-7
 RHO_CU_20 = 1.724e-8
 ALPHA_CU = 0.00393
+FERRITE_RHO_KG_PER_M3 = 4800.0
 
 def parse_num(s):
     if isinstance(s, (int, float)): return float(s)
@@ -29,6 +30,16 @@ def parse_num(s):
 
 def rho_cu_at(Tc: float) -> float:
     return RHO_CU_20 * (1.0 + ALPHA_CU * (Tc - 20.0))
+
+def steinmetz_ki(k: float, alpha: float, beta: float) -> float:
+    """Calculate ki from classic Steinmetz coefficients.
+
+    Based on the iGSE formulation in \[1].
+    """
+    x = (beta - alpha + 1.0) / 2.0
+    y = (alpha + 1.0) / 2.0
+    integral = 2.0 * math.gamma(x) * math.gamma(y) / math.gamma(x + y)
+    return k / ((2.0 * math.pi) ** (alpha - 1.0) * integral)
 
 # Simple AWG table: (gauge, area_mm2)
 AWG_TABLE = [
@@ -142,6 +153,15 @@ class Steinmetz:
     k: float
     alpha: float
     beta: float
+    k_unit: str = "W/m3"
+    rho_kg_per_m3: float = FERRITE_RHO_KG_PER_M3
+    ki: float = field(init=False)
+
+    def __post_init__(self):
+        if self.k_unit.lower() in ("w/kg", "w_per_kg"):
+            self.k *= self.rho_kg_per_m3
+            self.k_unit = "W/m3"
+        self.ki = steinmetz_ki(self.k, self.alpha, self.beta)
 
 @dataclass
 class MosfetParams:
@@ -380,8 +400,15 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
 
     p_core_W = None
     if core.core_volume_mm3 and stein:
-        Pv = stein.k * (fin.fsw**stein.alpha) * (dB**stein.beta)
         vol_m3 = core.core_volume_mm3 * 1e-9
+        ton = ini.d_vin_min * period
+        tdemag = toff
+        slope_on = fin.vin_max / (np_turns * Ae)
+        v_off_pri = (main.v + main.diode_drop) * k_act
+        slope_off = v_off_pri / (np_turns * Ae)
+        deltaB = dB
+        term = (abs(slope_on) ** stein.alpha) * ton + (abs(slope_off) ** stein.alpha) * tdemag
+        Pv = stein.ki * (deltaB ** (stein.beta - stein.alpha)) * term / period
         p_core_W = Pv * vol_m3
         losses["Pcore_W"] = p_core_W
 
@@ -480,7 +507,12 @@ def normalize_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
             if k in cfg["geometry"]: cfg["geometry"][k] = p(cfg["geometry"][k])
     if "steinmetz" in cfg:
         for k in ["k","alpha","beta"]:
-            if k in cfg["steinmetz"]: cfg["steinmetz"][k] = p(cfg["steinmetz"][k])
+            if k in cfg["steinmetz"]:
+                cfg["steinmetz"][k] = p(cfg["steinmetz"][k])
+        if "k_unit" in cfg["steinmetz"]:
+            cfg["steinmetz"]["k_unit"] = str(cfg["steinmetz"]["k_unit"]).strip()
+        if "rho_kg_per_m3" in cfg["steinmetz"]:
+            cfg["steinmetz"]["rho_kg_per_m3"] = p(cfg["steinmetz"]["rho_kg_per_m3"])
     if "mosfet" in cfg:
         for k in ["rds_on_mohm","rds_temp_C","rds_temp_coeff","tr_ns","tf_ns","coss_nF","coss_pF","qg_nC","vgate_V","k_sw_overlap"]:
             if k in cfg["mosfet"]: cfg["mosfet"][k] = p(cfg["mosfet"][k])
@@ -540,7 +572,7 @@ def main():
     p = argparse.ArgumentParser(description="Flyback (DCM) design tool v5")
     p.add_argument("--config", type=str, help="JSON config file")
     p.add_argument("--json", action="store_true")
-    p.add_argument("--corelib", type=str, help="Path to core_library_v5.json", default="core_library_v5.json")
+    p.add_argument("--corelib", type=str, help="Path to core_library_v5_with_waveforms.json", default="core_library_v5_with_waveforms.json")
     args = p.parse_args()
 
     if not args.config:

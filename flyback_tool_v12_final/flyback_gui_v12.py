@@ -20,7 +20,7 @@ try:
 except Exception as e:
     HAVE_CORE = False
     IMPORT_ERR = str(e)
-LIB_DEFAULT = "core_library_v5.json"
+LIB_DEFAULT = "core_library_v5_with_waveforms.json"
 class Tooltip(tk.Toplevel):
     def __init__(self, widget, text="", **kw):
         super().__init__(widget, **kw)
@@ -79,7 +79,7 @@ class App(tk.Tk):
             "geometry": {"jmax_A_per_mm2":"4.0","mlt_pri_mm":"40","mlt_sec_default_mm":"40","window_area_mm2":"70","copper_temp_C":"60","ac_factor_pri":"1.5","ac_factor_sec":"1.5"},
             "rcd": {"enable": True, "leakage_frac":"0.015","vclamp_target_V":"450","ripple_frac":"0.1","return_to_bus": True},
             "mosfet": {"rds_on_mohm":"150","rds_temp_C":"100","rds_temp_coeff":"0.004","tr_ns":"30","tf_ns":"30","coss_pF":"100","qg_nC":"40","vgate_V":"10","k_sw_overlap":"1.0"},
-            "steinmetz": {"k":"3.2","alpha":"1.5","beta":"2.6"},
+            "steinmetz": {"k":"3.2","k_unit":"W/kg","alpha":"1.5","beta":"2.6"},
             "k_optimize": {"criterion":"min_vds","dmin":"0.22","dmax":"0.48","dstep":"0.02"}
         }
         self.build_inputs_tab()
@@ -221,8 +221,12 @@ class App(tk.Tk):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Steinmetz")
         s = self.model["steinmetz"]
         self.st_vars = {k: tk.StringVar(value=str(s.get(k,""))) for k in ["k","alpha","beta"]}
+        self.st_unit_var = tk.StringVar(value=s.get("k_unit","W/m3"))
         grid = ttk.Frame(tab, padding=10); grid.pack(fill="both", expand=True)
-        for r,(lbl,k) in enumerate([("k","k"),("alpha","alpha"),("beta","beta")]):
+        ttk.Label(grid, text="k").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Entry(grid, textvariable=self.st_vars["k"], width=20).grid(row=0, column=1, sticky="w", pady=3)
+        ttk.Combobox(grid, textvariable=self.st_unit_var, values=["W/m3","W/kg"], width=6, state="readonly").grid(row=0, column=2, sticky="w", padx=4)
+        for r,(lbl,k) in enumerate([("alpha","alpha"),("beta","beta")], start=1):
             ttk.Label(grid, text=lbl).grid(row=r, column=0, sticky="w", pady=3)
             ttk.Entry(grid, textvariable=self.st_vars[k], width=20).grid(row=r, column=1, sticky="w", pady=3)
     def build_k_tab(self):
@@ -263,6 +267,7 @@ class App(tk.Tk):
         ttk.Label(top, text="(double-click row to apply)").pack(side="left", padx=6)
         cols=("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped")
         self.core_cols = cols
+        self.core_items: Dict[str, Any] = {}
         table = ttk.Frame(tab)
         table.pack(fill="both", expand=True, padx=6, pady=6)
         self.core_tree = ttk.Treeview(table, columns=cols, show="headings")
@@ -287,7 +292,8 @@ class App(tk.Tk):
                 data = json.load(open(LIB_DEFAULT, "r", encoding="utf-8"))
                 for it in data.get("cores", []):
                     vals = ["" if it.get(k) is None else str(it.get(k)) for k in self.core_cols]
-                    self.core_tree.insert("", "end", values=vals)
+                    iid = self.core_tree.insert("", "end", values=vals)
+                    self.core_items[iid] = it
             except Exception as e:
                 messagebox.showwarning("Library", str(e))
     def on_core_hover(self, event):
@@ -305,12 +311,25 @@ class App(tk.Tk):
     def use_selected_core(self):
         sel = self.core_tree.selection()
         if not sel: return
-        vals = self.core_tree.item(sel[0], "values")
+        iid = sel[0]
+        vals = self.core_tree.item(iid, "values")
         mapping = {"ae_mm2": vals[6], "le_mm": vals[7], "bmax_T": vals[10], "al_nH_per_turn2": vals[11]}
-        for k,v in mapping.items():
-            if k in self.core_vars: self.core_vars[k].set(str(v))
-        if vals[8]:
-            self.core_vars["core_volume_mm3"].set(str(vals[8]))
+        for k, v in mapping.items():
+            if k in self.core_vars:
+                self.core_vars[k].set(str(v))
+        item = self.core_items.get(iid, {})
+        ve = item.get("Ve_mm3")
+        if ve is not None:
+            self.core_vars["core_volume_mm3"].set(str(ve))
+        st = item.get("steinmetz")
+        if isinstance(st, dict):
+            for k in ["k", "alpha", "beta"]:
+                v = st.get(k)
+                if v is not None and k in self.st_vars:
+                    self.st_vars[k].set(str(v))
+            unit = st.get("k_unit")
+            if unit:
+                self.st_unit_var.set(unit)
     def build_results_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Results")
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
@@ -363,6 +382,7 @@ class App(tk.Tk):
                "return_to_bus": bool(self.rcd_vars["return_to_bus"].get())}
         mos = {k: v.get() for k,v in self.mos_vars.items()}
         st = {k: v.get() for k,v in self.st_vars.items()}
+        st["k_unit"] = self.st_unit_var.get()
         kopt = {k: v.get() for k,v in self.k_vars.items()}
         cfg = {"input": inp, "outputs": outs, "core": core, "geometry": geom, "rcd": rcd, "mosfet": mos, "steinmetz": st, "cin_vrip": cin_vrip, "k_optimize": kopt}
         return cfg
@@ -428,11 +448,13 @@ class App(tk.Tk):
         if not path: return
         try:
             data = json.load(open(path,"r",encoding="utf-8"))
+            self.core_items.clear()
             for iid in self.core_tree.get_children():
                 self.core_tree.delete(iid)
             for it in data.get("cores", []):
                 vals = ["" if it.get(k) is None else str(it.get(k)) for k in self.core_cols]
-                self.core_tree.insert("", "end", values=vals)
+                iid = self.core_tree.insert("", "end", values=vals)
+                self.core_items[iid] = it
         except Exception as e:
             messagebox.showerror("Library", str(e))
     def show_results(self, res: Dict[str, Any]):
