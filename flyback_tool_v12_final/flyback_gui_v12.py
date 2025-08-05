@@ -376,6 +376,7 @@ class App(tk.Tk):
                 ("K_ideal", lambda r: r["K"], "{:>8.3f}", 8),
                 ("Vds[V]", lambda r: r["Vds"], "{:>8.1f}", 8),
                 ("Ipk[A]", lambda r: r["Ipk"], "{:>8.2f}", 8),
+                ("ΔB[T]", lambda r: r["dB_T"], "{:>8.3f}", 8),
             ]
             for o in outs:
                 col_specs.append((f"VRRM_{o.name}[V]", lambda r, nm=o.name: r[f"VRRM_{nm}"], "{:>10.1f}", 10))
@@ -387,7 +388,7 @@ class App(tk.Tk):
                 lines.append(line)
             best = sweep["best"]
             lines.append("")
-            lines.append(f"BEST: D={best['D']:.3f}")
+            lines.append(f"BEST: D={best['D']:.3f}, ΔB={best['ref'].delta_B_T:.3f} T")
             self.k_result.delete("1.0","end"); self.k_result.insert("1.0", "\n".join(lines))
             self.sweep_cache = sweep
         except Exception as e:
@@ -443,6 +444,14 @@ class App(tk.Tk):
             lines.append(f"DCM_ok = {r['dcm_ok_main']}")
             lines.append(f"VDS ideal = {r['vds_ideal_V']:.2f} V")
             lines.append(f"VDS with clamp = {r['vds_with_overhead_V']:.2f} V")
+            lines.append(f"ΔB = {r['delta_B_T']:.3f} T")
+            vref = ini['vref_V']
+            for o in res["outputs"]:
+                name = o["name"]
+                ns = r["ns_turns"][name]
+                k_i = r["np_turns"] / ns
+                vout_real = vref / k_i - o.get("diode_drop", 0.0)
+                lines.append(f"Vout_real[{name}] = {vout_real:.2f} V")
             lines.append("")
             if r.get('diode_vrrm_required_each_V'):
                 for name, v in r['diode_vrrm_required_each_V'].items():
