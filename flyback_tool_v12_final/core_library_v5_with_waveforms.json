@@ -1,0 +1,278 @@
+{
+  "cores": [
+    {
+      "vendor": "EPCOS/TDK",
+      "distributor": "ChipDip",
+      "distributor_sku": "B66358-G-X187",
+      "series": "ETD",
+      "size": "ETD29/16/10",
+      "material": "N87",
+      "Ae_mm2": 76.0,
+      "le_mm": 70.4,
+      "Ve_mm3": 5350.0,
+      "Aw_mm2": 97.0,
+      "AL_nH_per_turn2_ungapped": 2200.0,
+      "Bmax_T": 0.2,
+      "steinmetz": {
+        "model": "classic",
+        "coefficients": [
+          {
+            "waveform": "sine",
+            "k": 3.47816153320305e-05,
+            "alpha": 1.63492941721237,
+            "beta": 2.25271092818147,
+            "temperature": "≈25°C (room temperature)",
+            "P_units": "W/kg",
+            "B_units": "T",
+            "f_units": "Hz",
+            "B0_T": 1.0,
+            "f0_Hz": 1.0,
+            "source": "NETL Core Loss Datasheet – MnZn Ferrite (EPCOS N87), 2018, Table 5"
+          },
+          {
+            "waveform": "triangle",
+            "method": "iGSE",
+            "duty_cycle": "0.5"
+          },
+          {
+            "waveform": "square",
+            "method": "iGSE",
+            "duty_cycle": "0.5"
+          },
+          {
+            "waveform": "trapezoid",
+            "method": "iGSE",
+            "duty_cycle": "0.5"
+          }
+        ],
+        "models": {
+          "iGSE": {
+            "alpha": 1.63492941721237,
+            "beta": 2.25271092818147,
+            "k_i": 2.0821566429913574e-06,
+            "units": {
+              "P": "W/kg",
+              "B": "T",
+              "f": "Hz"
+            },
+            "definition": "P = (1/T) ∫ k_i * |dB/dt|^alpha * (ΔB)^(beta-alpha) dt",
+            "supported_waveforms": [
+              "sine",
+              "triangle",
+              "square",
+              "trapezoid",
+              "sawtooth",
+              "arbitrary_piecewise_linear"
+            ],
+            "sources": [
+              "Li, Abdallah, Sullivan, IAS 2001 (GSE/iGSE)",
+              "Mühlethaler et al., APEC 2011; PSMA 2012 tutorial"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "vendor": "EPCOS/TDK",
+      "distributor": "ChipDip",
+      "distributor_sku": "B66317-G-X187",
+      "series": "E (EF25)",
+      "size": "E 25/13/7",
+      "material": "N87",
+      "Ae_mm2": 52.5,
+      "le_mm": 57.5,
+      "Ve_mm3": 3020.0,
+      "Aw_mm2": 61.0,
+      "AL_nH_per_turn2_ungapped": 1850.0,
+      "Bmax_T": 0.2,
+      "steinmetz": {
+        "model": "classic",
+        "coefficients": [
+          {
+            "waveform": "sine",
+            "k": 3.47816153320305e-05,
+            "alpha": 1.63492941721237,
+            "beta": 2.25271092818147,
+            "temperature": "≈25°C (room temperature)",
+            "P_units": "W/kg",
+            "B_units": "T",
+            "f_units": "Hz",
+            "B0_T": 1.0,
+            "f0_Hz": 1.0,
+            "source": "NETL Core Loss Datasheet – MnZn Ferrite (EPCOS N87), 2018, Table 5"
+          },
+          {
+            "waveform": "triangle",
+            "method": "iGSE",
+            "duty_cycle": "0.5"
+          },
+          {
+            "waveform": "square",
+            "method": "iGSE",
+            "duty_cycle": "0.5"
+          },
+          {
+            "waveform": "trapezoid",
+            "method": "iGSE",
+            "duty_cycle": "0.5"
+          }
+        ],
+        "models": {
+          "iGSE": {
+            "alpha": 1.63492941721237,
+            "beta": 2.25271092818147,
+            "k_i": 2.0821566429913574e-06,
+            "units": {
+              "P": "W/kg",
+              "B": "T",
+              "f": "Hz"
+            },
+            "definition": "P = (1/T) ∫ k_i * |dB/dt|^alpha * (ΔB)^(beta-alpha) dt",
+            "supported_waveforms": [
+              "sine",
+              "triangle",
+              "square",
+              "trapezoid",
+              "sawtooth",
+              "arbitrary_piecewise_linear"
+            ],
+            "sources": [
+              "Li, Abdallah, Sullivan, IAS 2001 (GSE/iGSE)",
+              "Mühlethaler et al., APEC 2011; PSMA 2012 tutorial"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "vendor": "EPCOS/TDK",
+      "distributor": "ChipDip",
+      "distributor_sku": "B66421-U250-K187",
+      "series": "EFD",
+      "size": "EFD25/13/9",
+      "material": "N87",
+      "Ae_mm2": 58.0,
+      "le_mm": 57.0,
+      "Ve_mm3": 3310.0,
+      "Aw_mm2": null,
+      "AL_nH_per_turn2_ungapped": 2000.0,
+      "Bmax_T": 0.2,
+      "steinmetz": {
+        "model": "classic",
+        "coefficients": [
+          {
+            "waveform": "sine",
+            "k": 3.47816153320305e-05,
+            "alpha": 1.63492941721237,
+            "beta": 2.25271092818147,
+            "temperature": "≈25°C (room temperature)",
+            "P_units": "W/kg",
+            "B_units": "T",
+            "f_units": "Hz",
+            "B0_T": 1.0,
+            "f0_Hz": 1.0,
+            "source": "NETL Core Loss Datasheet – MnZn Ferrite (EPCOS N87), 2018, Table 5"
+          },
+          {
+            "waveform": "triangle",
+            "method": "iGSE",
+            "duty_cycle": "0.5"
+          },
+          {
+            "waveform": "square",
+            "method": "iGSE",
+            "duty_cycle": "0.5"
+          },
+          {
+            "waveform": "trapezoid",
+            "method": "iGSE",
+            "duty_cycle": "0.5"
+          }
+        ],
+        "models": {
+          "iGSE": {
+            "alpha": 1.63492941721237,
+            "beta": 2.25271092818147,
+            "k_i": 2.0821566429913574e-06,
+            "units": {
+              "P": "W/kg",
+              "B": "T",
+              "f": "Hz"
+            },
+            "definition": "P = (1/T) ∫ k_i * |dB/dt|^alpha * (ΔB)^(beta-alpha) dt",
+            "supported_waveforms": [
+              "sine",
+              "triangle",
+              "square",
+              "trapezoid",
+              "sawtooth",
+              "arbitrary_piecewise_linear"
+            ],
+            "sources": [
+              "Li, Abdallah, Sullivan, IAS 2001 (GSE/iGSE)",
+              "Mühlethaler et al., APEC 2011; PSMA 2012 tutorial"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "vendor": "Shinhom",
+      "distributor": "Промэлектроника",
+      "distributor_sku": "EFD25 P3 core",
+      "series": "EFD",
+      "size": "EFD25/13/9",
+      "material": "P3",
+      "Ae_mm2": 58.0,
+      "le_mm": 57.0,
+      "Ve_mm3": 3310.0,
+      "Aw_mm2": null,
+      "AL_nH_per_turn2_ungapped": 2000.0,
+      "Bmax_T": 0.2,
+      "steinmetz": {
+        "model": "classic",
+        "coefficients": [
+          {
+            "waveform": "sine",
+            "k": null,
+            "alpha": null,
+            "beta": null,
+            "temperature": "60–100°C recommended fitting range",
+            "P_units": "kW/m^3",
+            "B_units": "T",
+            "f_units": "Hz",
+            "B0_T": 1.0,
+            "f0_Hz": 1.0,
+            "note": "Shinhom P3 datasheet gives loss curves vs B at multiple f and T, but no Steinmetz table. Coefficients should be obtained by regression using the curves (e.g., at 60°C or 100°C)."
+          }
+        ],
+        "source_hint": "Shinhom P3 Material characteristics (loss curves at 60°C and 100°C)",
+        "models": {
+          "iGSE": {
+            "alpha": null,
+            "beta": null,
+            "k_i": null,
+            "units": {
+              "P": "W/kg",
+              "B": "T",
+              "f": "Hz"
+            },
+            "definition": "P = (1/T) ∫ k_i * |dB/dt|^alpha * (ΔB)^(beta-alpha) dt",
+            "supported_waveforms": [
+              "sine",
+              "triangle",
+              "square",
+              "trapezoid",
+              "sawtooth",
+              "arbitrary_piecewise_linear"
+            ],
+            "sources": [
+              "Li, Abdallah, Sullivan, IAS 2001 (GSE/iGSE)",
+              "Mühlethaler et al., APEC 2011; PSMA 2012 tutorial"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
