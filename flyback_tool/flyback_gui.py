@@ -378,7 +378,7 @@ class App(tk.Tk):
             "core": {"ae_mm2":"58","le_mm":"57","bmax_T":"0.20","core_volume_mm3":"3310"},
             "geometry": {"jmax_A_per_mm2":"4.0","mlt_pri_mm":"40","mlt_sec_default_mm":"40","window_area_mm2":"70","copper_temp_C":"60","ac_factor_pri":"1.5","ac_factor_sec":"1.5"},
             "rcd": {"enable": True, "leakage_frac":"0.015","vclamp_target_V":"450","ripple_frac":"0.1","return_to_bus": True},
-            "mosfet": {"rds_on_mohm":"150","rds_temp_C":"100","rds_temp_coeff":"0.004","tr_ns":"30","tf_ns":"30","coss_pF":"100","qg_nC":"40","vgate_V":"10","k_sw_overlap":"1.0"},
+            "mosfet": {"vds_V":"600","rds_on_mohm":"150","rds_temp_C":"100","rds_temp_coeff":"0.004","tr_ns":"30","tf_ns":"30","coss_pF":"100","qg_nC":"40","vgate_V":"10","k_sw_overlap":"1.0"},
             "steinmetz": {"k":"3.2","k_unit":"W/kg","alpha":"1.5","beta":"2.6"},
             "k_optimize": {"criterion":"min_vds","dmin":"0.22","dmax":"0.48","dstep":"0.02"}
         }
@@ -439,9 +439,6 @@ class App(tk.Tk):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Inputs")
         input_keys = [k for k in self.model["input"].keys() if k not in ("force_dcm",)]
         self.inputs_vars = {k: tk.StringVar(value=str(self.model["input"].get(k,""))) for k in input_keys}
-        # ensure cin_vrip present in inputs_vars
-        if "cin_vrip" in self.model:
-            self.inputs_vars["cin_vrip"] = tk.StringVar(value=str(self.model.get("cin_vrip","")))
         self.force_dcm_var = tk.BooleanVar(value=bool(self.model["input"].get("force_dcm", False)))
         grid = ttk.Frame(tab, padding=10); grid.pack(fill="both", expand=True)
         labels=[("Vin_min [V]","vin_min"),("Vin_max [V]","vin_max"),("fsw [Hz]","fsw"),("Dmax","duty_max"),
@@ -554,10 +551,10 @@ class App(tk.Tk):
     def build_mosfet_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="MOSFET")
         m = self.model["mosfet"]
-        self.mos_vars = {k: tk.StringVar(value=str(m.get(k,""))) for k in ["rds_on_mohm","rds_temp_C","rds_temp_coeff","tr_ns","tf_ns","coss_pF","qg_nC","vgate_V","k_sw_overlap"]}
+        self.mos_vars = {k: tk.StringVar(value=str(m.get(k,""))) for k in ["vds_V","rds_on_mohm","rds_temp_C","rds_temp_coeff","tr_ns","tf_ns","coss_pF","qg_nC","vgate_V","k_sw_overlap"]}
         grid = ttk.Frame(tab, padding=10); grid.pack(fill="both", expand=True)
         ttk.Button(grid, text="Choose from library", command=self.open_mosfet_library).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0,6))
-        labels=[("Rds_on [mΩ]","rds_on_mohm"),("Tj for Rds [°C]","rds_temp_C"),("Rds temp coeff [1/K]","rds_temp_coeff"),
+        labels=[("Vds max [V]","vds_V"),("Rds_on [mΩ]","rds_on_mohm"),("Tj for Rds [°C]","rds_temp_C"),("Rds temp coeff [1/K]","rds_temp_coeff"),
                 ("tr [ns]","tr_ns"),("tf [ns]","tf_ns"),("Coss [pF]","coss_pF"),("Qg [nC]","qg_nC"),("Vgate [V]","vgate_V"),("k_sw_overlap","k_sw_overlap")]
         start=1
         for r,(lbl,k) in enumerate(labels, start=start):
@@ -655,7 +652,6 @@ class App(tk.Tk):
         idx = self.tree.index(sel[0]); del self.model["outputs"][idx]; self.tree.delete(sel[0])
     def collect_cfg(self) -> Dict[str, Any]:
         inp = {k: v.get() for k,v in self.inputs_vars.items()}
-        cin_vrip = inp.pop("cin_vrip","5.0")
         inp["force_dcm"] = bool(self.force_dcm_var.get())
         outs=[]
         for iid in self.tree.get_children():
@@ -673,7 +669,7 @@ class App(tk.Tk):
         st = {k: v.get() for k,v in self.st_vars.items()}
         st["k_unit"] = self.st_unit_var.get()
         kopt = {k: v.get() for k,v in self.k_vars.items()}
-        cfg = {"input": inp, "outputs": outs, "core": core, "geometry": geom, "rcd": rcd, "mosfet": mos, "steinmetz": st, "cin_vrip": cin_vrip, "k_optimize": kopt}
+        cfg = {"input": inp, "outputs": outs, "core": core, "geometry": geom, "rcd": rcd, "mosfet": mos, "steinmetz": st, "k_optimize": kopt}
         return cfg
     def compute(self):
         if not HAVE_CORE:
@@ -700,7 +696,7 @@ class App(tk.Tk):
             crit = self.k_vars["criterion"].get()
             dmin=float(self.k_vars["dmin"].get()); dmax=float(self.k_vars["dmax"].get()); dstep=float(self.k_vars["dstep"].get())
             sweep = sweep_k(fin, outs, geom, core, rcd=rcd, stein=stein, mosfet=mos, criterion=crit,
-                             dmin=dmin, dmax=dmax, dstep=dstep, cin_vrip=cfg_norm.get("cin_vrip",5.0),
+                             dmin=dmin, dmax=dmax, dstep=dstep,
                              force_dcm=fin.force_dcm)
             lines = [f"Criterion: {crit}"]
             col_specs = [
@@ -777,6 +773,14 @@ class App(tk.Tk):
             if r.get('diode_vrrm_required_each_V'):
                 for name, v in r['diode_vrrm_required_each_V'].items():
                     lines.append(f"VRRM[{name}] = {v:.2f} V")
+            if res.get('ratings'):
+                lines.append("--- RATING CHECKS ---")
+                for k, v in res['ratings'].items():
+                    lines.append(f"{k} = {v:.2f}x")
+            if res.get('warnings'):
+                lines.append("WARNINGS:")
+                for w in res['warnings']:
+                    lines.append(f"! {w}")
             if r.get('rcd'):
                 rc = r['rcd']
                 lines.append(f"RCD clamp: Vclamp = {rc['Vclamp_V']:.1f} V; C = {rc['C_snub_F']:.3e} F; R = {rc['R_snub_Ohm']:.1f} Ω; P_snub = {rc['P_lk_W']:.2f} W")
@@ -827,7 +831,7 @@ class App(tk.Tk):
             cfg = json.load(open(path,"r",encoding="utf-8"))
             # migrate cin_vrip from root to input if needed
             if "cin_vrip" in cfg and "input" in cfg:
-                cfg["input"]["cin_vrip"] = cfg["cin_vrip"]
+                cfg["input"]["cin_vrip"] = cfg.pop("cin_vrip")
             if "cin_vrrip" in cfg and "input" in cfg:
                 cfg["input"]["cin_vrip"] = cfg.pop("cin_vrrip")
             core = cfg.get("core", {})

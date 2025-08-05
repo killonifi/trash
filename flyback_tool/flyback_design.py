@@ -103,24 +103,25 @@ class OutputSpec:
     diode_drop: float = 0.5
     mlt_mm: Optional[float] = None
     qrr_nC: Optional[float] = None
-def __post_init__(self):
-    """Ensure all numeric fields are floats; accept suffixes k, m, u etc."""
-    self.v = parse_num(self.v)
-    self.i = parse_num(self.i)
-    self.ripple_v = parse_num(self.ripple_v)
-    self.diode_drop = parse_num(self.diode_drop)
-    # optional fields
-    if self.mlt_mm is not None and self.mlt_mm != "":
-        self.mlt_mm = parse_num(self.mlt_mm)
-    if self.qrr_nC is None or self.qrr_nC == "":
-        self.qrr_nC = 0.0
-    else:
-        self.qrr_nC = parse_num(self.qrr_nC)
+    def __post_init__(self):
+        """Ensure all numeric fields are floats; accept suffixes k, m, u etc."""
+        self.v = parse_num(self.v)
+        self.i = parse_num(self.i)
+        self.ripple_v = parse_num(self.ripple_v)
+        self.diode_drop = parse_num(self.diode_drop)
+        # optional fields
+        if self.mlt_mm is not None and self.mlt_mm != "":
+            self.mlt_mm = parse_num(self.mlt_mm)
+        if self.qrr_nC is None or self.qrr_nC == "":
+            self.qrr_nC = 0.0
+        else:
+            self.qrr_nC = parse_num(self.qrr_nC)
 @dataclass
 class FlybackInput:
     vin_min: float
     vin_max: float
     fsw: float
+    cin_vrip: float = 5.0
     duty_max: float = 0.45
     eff: float = 0.88
     input_type: str = "dc"
@@ -165,6 +166,7 @@ class Steinmetz:
 
 @dataclass
 class MosfetParams:
+    vds_V: float = 650.0
     rds_on_mohm: float = 150.0
     rds_temp_C: float = 100.0
     rds_temp_coeff: float = 0.004
@@ -231,7 +233,7 @@ class RefinedDesign:
 def estimate_duty(vref: float, vin: float) -> float:
     return vref / (vin + vref)
 
-def estimate_initial_design(fin: FlybackInput, outputs: List[OutputSpec], cin_vrip: float = 5.0, vref_override: Optional[float]=None) -> InitialDesign:
+def estimate_initial_design(fin: FlybackInput, outputs: List[OutputSpec], vref_override: Optional[float]=None) -> InitialDesign:
     pout = sum(o.v * o.i for o in outputs)
     pout_worst = pout * fin.overload
     main_name = fin.main_output or outputs[0].name
@@ -260,9 +262,9 @@ def estimate_initial_design(fin: FlybackInput, outputs: List[OutputSpec], cin_vr
 
     if fin.input_type.lower() == "dc":
         iin = pout / (fin.eff * fin.vin_min)
-        cin_min = iin * dmin / (max(1e-6, cin_vrip) * fin.fsw)
+        cin_min = iin * dmin / (max(1e-6, fin.cin_vrip) * fin.fsw)
     else:
-        cin_min = pout / (fin.eff * max(1e-3, cin_vrip) * 2.0 * fin.f_line)
+        cin_min = pout / (fin.eff * max(1e-3, fin.cin_vrip) * 2.0 * fin.f_line)
 
     d_vin_min = dmin
     d_vin_max = estimate_duty(vref, fin.vin_max)
@@ -457,13 +459,13 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
 def sweep_k(fin: FlybackInput, outputs: List[OutputSpec], geom: Geometry, core: CoreParameters,
             rcd: Optional[RCDClamp]=None, stein: Optional[Steinmetz]=None, mosfet: Optional[MosfetParams]=None,
             criterion: str = "min_vds", dmin: float = 0.2, dmax: float = 0.5, dstep: float = 0.02,
-            cin_vrip: float = 5.0, force_dcm: bool=False) -> Dict[str, Any]:
+            force_dcm: bool=False) -> Dict[str, Any]:
     main_name = fin.main_output or outputs[0].name
     grid = []
     best = None
     for D in [dmin + i*dstep for i in range(int((dmax-dmin)/dstep)+1)]:
         vref = (D/(1.0-D)) * fin.vin_min
-        ini = estimate_initial_design(fin, outputs, cin_vrip=cin_vrip, vref_override=vref)
+        ini = estimate_initial_design(fin, outputs, vref_override=vref)
         ref = refine_with_core(fin, geom, core, ini, outputs, rcd=rcd, stein=stein, mosfet=mosfet,
                                force_dcm=force_dcm)
         vds = ref.vds_with_overhead_V
@@ -487,7 +489,7 @@ def normalize_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
         try: return parse_num(x)
         except: return x
     if "input" in cfg:
-        for k in ["vin_min","vin_max","fsw","duty_max","eff","f_line","overload"]:
+        for k in ["vin_min","vin_max","fsw","duty_max","eff","f_line","overload","cin_vrip"]:
             if k in cfg["input"]: cfg["input"][k] = p(cfg["input"][k])
         if "force_dcm" in cfg["input"]:
             v = cfg["input"]["force_dcm"]
@@ -514,12 +516,11 @@ def normalize_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
         if "rho_kg_per_m3" in cfg["steinmetz"]:
             cfg["steinmetz"]["rho_kg_per_m3"] = p(cfg["steinmetz"]["rho_kg_per_m3"])
     if "mosfet" in cfg:
-        for k in ["rds_on_mohm","rds_temp_C","rds_temp_coeff","tr_ns","tf_ns","coss_nF","coss_pF","qg_nC","vgate_V","k_sw_overlap"]:
+        for k in ["vds_V","rds_on_mohm","rds_temp_C","rds_temp_coeff","tr_ns","tf_ns","coss_nF","coss_pF","qg_nC","vgate_V","k_sw_overlap"]:
             if k in cfg["mosfet"]: cfg["mosfet"][k] = p(cfg["mosfet"][k])
     if "rcd" in cfg:
         for k in ["leakage_frac","vclamp_target_V","ripple_frac","margin"]:
             if k in cfg["rcd"]: cfg["rcd"][k] = p(cfg["rcd"][k])
-    if "cin_vrip" in cfg: cfg["cin_vrip"] = p(cfg["cin_vrip"])
     if "k_optimize" in cfg:
         for k in ["dmin","dmax","dstep"]:
             if k in cfg["k_optimize"]:
@@ -534,9 +535,8 @@ def run(cfg: Dict[str, Any], corelib: Optional[Dict[str, Any]] = None) -> Dict[s
     cfg = normalize_cfg(cfg)
     fin = FlybackInput(**cfg["input"])
     outs = [OutputSpec(**o) for o in cfg["outputs"]]
-    cin_vrip = cfg.get("cin_vrip", 5.0)
     vref_override = cfg.get("vref_override", None)
-    ini = estimate_initial_design(fin, outs, cin_vrip=cin_vrip, vref_override=vref_override)
+    ini = estimate_initial_design(fin, outs, vref_override=vref_override)
 
     res = {"input": asdict(fin), "outputs":[asdict(o) for o in outs], "initial": asdict(ini)}
     if "core" in cfg and "geometry" in cfg:
@@ -551,17 +551,29 @@ def run(cfg: Dict[str, Any], corelib: Optional[Dict[str, Any]] = None) -> Dict[s
             crit = kcfg.get("criterion","min_vds")
             dmin = float(kcfg.get("dmin",0.2)); dmax=float(kcfg.get("dmax",0.5)); dstep=float(kcfg.get("dstep",0.02))
             sweep = sweep_k(fin, outs, geom, core, rcd=rcd, stein=stein, mosfet=mosfet, criterion=crit,
-                            dmin=dmin, dmax=dmax, dstep=dstep, cin_vrip=cin_vrip,
+                            dmin=dmin, dmax=dmax, dstep=dstep,
                             force_dcm=fin.force_dcm)
             res["k_sweep"] = {"criterion": crit, "best": {"D": sweep["best"]["D"], "metric": sweep["best"]["metric"]},
                               "grid_len": len(sweep["grid"])}
             best_ini = sweep["best"]["ini"]; best_ref = sweep["best"]["ref"]
             res["initial"] = asdict(best_ini)
             res["refined"] = asdict(best_ref)
+            if mosfet is not None and hasattr(mosfet, "vds_V"):
+                margin = mosfet.vds_V / best_ref.vds_with_overhead_V if best_ref.vds_with_overhead_V else float("inf")
+                res.setdefault("ratings", {})["mosfet_vds_margin"] = margin
+                if margin < 1.0 - 1e-6:
+                    res.setdefault("warnings", []).append(
+                        f"MOSFET Vds requirement {best_ref.vds_with_overhead_V:.1f} V exceeds rating {mosfet.vds_V:.1f} V")
         else:
             ref = refine_with_core(fin, geom, core, ini, outs, rcd=rcd, stein=stein, mosfet=mosfet,
                                    force_dcm=fin.force_dcm)
             res["refined"] = asdict(ref)
+            if mosfet is not None and hasattr(mosfet, "vds_V"):
+                margin = mosfet.vds_V / ref.vds_with_overhead_V if ref.vds_with_overhead_V else float("inf")
+                res.setdefault("ratings", {})["mosfet_vds_margin"] = margin
+                if margin < 1.0 - 1e-6:
+                    res.setdefault("warnings", []).append(
+                        f"MOSFET Vds requirement {ref.vds_with_overhead_V:.1f} V exceeds rating {mosfet.vds_V:.1f} V")
 
     if corelib:
         res["core_library"] = corelib
