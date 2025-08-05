@@ -116,14 +116,36 @@ class App(tk.Tk):
         self.force_dcm_var = tk.BooleanVar(value=bool(self.model["input"].get("force_dcm", False)))
         grid = ttk.Frame(tab, padding=10); grid.pack(fill="both", expand=True)
         labels=[("Vin_min [V]","vin_min"),("Vin_max [V]","vin_max"),("fsw [Hz]","fsw"),("Dmax","duty_max"),
-                ("eff","eff"),("input_type (dc/ac)","input_type"),("f_line [Hz]","f_line"),
+                ("eff","eff"),("Input type","input_type"),("f_line [Hz]","f_line"),
                 ("overload","overload"),("main_output name","main_output"),("Cin ripple [Vpp]","cin_vrip")]
         row=0
         for lbl,key in labels:
-            ttk.Label(grid, text=lbl).grid(row=row, column=0, sticky="w", pady=3)
-            ttk.Entry(grid, textvariable=self.inputs_vars[key], width=20).grid(row=row, column=1, sticky="w", pady=3)
+            if key == "f_line":
+                self.f_line_label = ttk.Label(grid, text=lbl)
+                self.f_line_label.grid(row=row, column=0, sticky="w", pady=3)
+                self.f_line_entry = ttk.Entry(grid, textvariable=self.inputs_vars[key], width=20)
+                self.f_line_entry.grid(row=row, column=1, sticky="w", pady=3)
+            else:
+                ttk.Label(grid, text=lbl).grid(row=row, column=0, sticky="w", pady=3)
+                if key == "input_type":
+                    self.input_type_cb = ttk.Combobox(
+                        grid, textvariable=self.inputs_vars[key], values=("dc","ac"), state="readonly", width=18
+                    )
+                    self.input_type_cb.grid(row=row, column=1, sticky="w", pady=3)
+                    self.input_type_cb.bind("<<ComboboxSelected>>", self.update_f_line_visibility)
+                else:
+                    ttk.Entry(grid, textvariable=self.inputs_vars[key], width=20).grid(row=row, column=1, sticky="w", pady=3)
             row+=1
         ttk.Checkbutton(grid, text="Force DCM", variable=self.force_dcm_var).grid(row=row, column=0, sticky="w", pady=3)
+        self.update_f_line_visibility()
+
+    def update_f_line_visibility(self, *args):
+        if self.inputs_vars["input_type"].get().lower() == "dc":
+            self.f_line_label.grid_remove()
+            self.f_line_entry.grid_remove()
+        else:
+            self.f_line_label.grid()
+            self.f_line_entry.grid()
     def build_outputs_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Outputs")
         frm = ttk.Frame(tab, padding=10); frm.pack(fill="both", expand=True)
@@ -240,6 +262,7 @@ class App(tk.Tk):
         ttk.Button(top, text="Use selected", command=self.use_selected_core).pack(side="left", padx=6)
         ttk.Label(top, text="(double-click row to apply)").pack(side="left", padx=6)
         cols=("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped")
+        self.core_cols = cols
         table = ttk.Frame(tab)
         table.pack(fill="both", expand=True, padx=6, pady=6)
         self.core_tree = ttk.Treeview(table, columns=cols, show="headings")
@@ -263,7 +286,8 @@ class App(tk.Tk):
             try:
                 data = json.load(open(LIB_DEFAULT, "r", encoding="utf-8"))
                 for it in data.get("cores", []):
-                    self.core_tree.insert("", "end", values=[it.get(k,"") for k in cols])
+                    vals = ["" if it.get(k) is None else str(it.get(k)) for k in self.core_cols]
+                    self.core_tree.insert("", "end", values=vals)
             except Exception as e:
                 messagebox.showwarning("Library", str(e))
     def on_core_hover(self, event):
@@ -407,7 +431,7 @@ class App(tk.Tk):
             for iid in self.core_tree.get_children():
                 self.core_tree.delete(iid)
             for it in data.get("cores", []):
-                vals = [it.get(k,"") for k in ("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped")]
+                vals = ["" if it.get(k) is None else str(it.get(k)) for k in self.core_cols]
                 self.core_tree.insert("", "end", values=vals)
         except Exception as e:
             messagebox.showerror("Library", str(e))
