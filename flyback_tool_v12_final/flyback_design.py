@@ -41,16 +41,16 @@ def steinmetz_ki(k: float, alpha: float, beta: float) -> float:
     integral = 2.0 * math.gamma(x) * math.gamma(y) / math.gamma(x + y)
     return k / ((2.0 * math.pi) ** (alpha - 1.0) * integral)
 
-# Simple AWG table: (gauge, area_mm2)
-AWG_TABLE = [
-    (10, 5.26), (11, 4.17), (12, 3.31), (13, 2.62), (14, 2.08),
-    (15, 1.65), (16, 1.31), (17, 1.04), (18, 0.823), (19, 0.653),
-    (20, 0.519), (21, 0.412), (22, 0.326), (23, 0.258), (24, 0.205),
-    (25, 0.162), (26, 0.129), (27, 0.102), (28, 0.0810), (29, 0.0642),
-    (30, 0.0509), (31, 0.0404), (32, 0.0320), (33, 0.0254), (34, 0.0201),
-    (35, 0.0160), (36, 0.0127), (37, 0.0100), (38, 0.00797),
-    (39, 0.00632), (40, 0.0050)
-]
+# Full AWG table: (gauge, area_mm2)
+def _awg_area_mm2(gauge: int) -> float:
+    d_inch = 0.005 * 92 ** ((36 - gauge) / 39)
+    d_mm = d_inch * 25.4
+    return math.pi * (d_mm / 2) ** 2
+
+AWG_TABLE = [(g, _awg_area_mm2(g)) for g in range(-3, 41)]
+
+def awg_str(gauge: int) -> str:
+    return "0" * (-gauge + 1) if gauge <= 0 else str(gauge)
 
 def select_awg(area_req: float, delta_mm: Optional[float] = None,
                max_parallel: int = 5) -> Dict[str, float]:
@@ -81,7 +81,7 @@ def select_awg(area_req: float, delta_mm: Optional[float] = None,
         best = find_best(table_skin)
         if best is not None:
             gauge, area, n, total = best
-            return {"awg": f"AWG{gauge}", "awg_area_mm2": area,
+            return {"awg": f"AWG{awg_str(gauge)}", "awg_area_mm2": area,
                     "parallel": n, "total_area_mm2": total}
 
     best = find_best(AWG_TABLE)
@@ -92,7 +92,7 @@ def select_awg(area_req: float, delta_mm: Optional[float] = None,
         best = (gauge, area, n, total)
 
     gauge, area, n, total = best
-    return {"awg": f"AWG{gauge}", "awg_area_mm2": area, "parallel": n, "total_area_mm2": total}
+    return {"awg": f"AWG{awg_str(gauge)}", "awg_area_mm2": area, "parallel": n, "total_area_mm2": total}
 
 @dataclass
 class OutputSpec:
@@ -572,7 +572,7 @@ def main():
     p = argparse.ArgumentParser(description="Flyback (DCM) design tool v5")
     p.add_argument("--config", type=str, help="JSON config file")
     p.add_argument("--json", action="store_true")
-    p.add_argument("--corelib", type=str, help="Path to core_library_v5_with_waveforms.json", default="core_library_v5_with_waveforms.json")
+    p.add_argument("--corelib", type=str, help="Path to core_library.json", default="core_library.json")
     args = p.parse_args()
 
     if not args.config:
