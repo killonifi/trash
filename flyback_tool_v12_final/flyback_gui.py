@@ -12,16 +12,36 @@ from tkinter import ttk, messagebox, filedialog
 import json, os
 from typing import Dict, Any
 try:
-    from flyback_design_v12 import (
+    from flyback_design import (
         parse_num, FlybackInput, OutputSpec, Geometry, CoreParameters, Steinmetz,
-        RCDClamp, MosfetParams, estimate_initial_design, refine_with_core, run, normalize_cfg, sweep_k
+        RCDClamp, MosfetParams, estimate_initial_design, refine_with_core, run, normalize_cfg, sweep_k,
+        AWG_TABLE, awg_str
     )
     HAVE_CORE = True
 except Exception as e:
     HAVE_CORE = False
     IMPORT_ERR = str(e)
-LIB_DEFAULT = "core_library_v5_with_waveforms.json"
-MOS_LIB_DEFAULT = "mosfet_library.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LIB_DEFAULT = os.path.join(BASE_DIR, "core_library.json")
+MOS_LIB_DEFAULT = os.path.join(BASE_DIR, "mosfet_library.json")
+EQUATIONS_TEXT = (
+    "(1) Vref = D_min/(1−D_min)·Vin_min\n"
+    "(2) K = Np/Ns = Vref/(Vout + Vf)\n"
+    "(3) D(Vin) = Vref/(Vin + Vref)\n"
+    "(4) Lm_target = Vin_min²·D(Vin_min)²·η/(2·Pout_max·f_sw)\n"
+    "(5) Ipk = Vin_min·D(Vin_min)/(Lm·f_sw)\n"
+    "(6) VDS_ideal,max = Vin_max + K·(Vout + Vf)\n"
+    "(7) VRRM_sec = (Np/Ns)·Vin_max + Vout + Vf\n"
+    "(8) Cout_min ≈ Iout·(1−D)/(2·ΔV·f_sw);\n"
+    "    Cin_min(dc) ≈ Iin·D/ΔVin·f_sw,  Iin≈Pout/(η·Vin_min)\n"
+    "(9) ΔB ≈ Vin_max·D/(Np·Ae·f_sw) → Np(min) из Bmax\n"
+    "(10) g ≈ μ0·Np²·Ae / Lm_target\n"
+    "(11) R_dc = ρ(T)·l/A,    P_cu = I_rms²·R_dc·k_ac\n"
+    "(12) Steinmetz P_v = k·f^α·B^β,    P_core = P_v·V_core\n"
+    "(13) MOSFET  P_cond,  P_sw ≈ 0.5·VDS·Ipk·(tr+tf)·f_sw·k_sw\n"
+    "      P_Coss ≈ 0.5·C_OSS·VDS²·f_sw,    P_gate = Qg·Vg·f_sw\n"
+    "(14) Диод  P_cond ≈ Iout·Vf;  P_rr ≈ Qrr·Vrev·f_sw\n"
+)
 class Tooltip(tk.Toplevel):
     def __init__(self, widget, text="", **kw):
         super().__init__(widget, **kw)
@@ -381,7 +401,40 @@ class App(tk.Tk):
         fm.add_separator()
         fm.add_command(label="Exit", command=self.destroy)
         m.add_cascade(label="File", menu=fm)
+        info = tk.Menu(m, tearoff=0)
+        info.add_command(label="Equations", command=self.show_equations)
+        info.add_command(label="AWG", command=self.show_awg_table)
+        m.add_cascade(label="Info", menu=info)
         self.config(menu=m)
+    def show_equations(self):
+        win = tk.Toplevel(self)
+        win.title("Equations")
+        txt = tk.Text(win, wrap="word", width=80, height=24)
+        ysb = ttk.Scrollbar(win, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=ysb.set)
+        txt.insert("1.0", EQUATIONS_TEXT)
+        txt.configure(state="disabled")
+        txt.grid(row=0, column=0, sticky="nsew")
+        ysb.grid(row=0, column=1, sticky="ns")
+        win.columnconfigure(0, weight=1)
+        win.rowconfigure(0, weight=1)
+    def show_awg_table(self):
+        win = tk.Toplevel(self)
+        win.title("AWG Table")
+        cols = ("AWG", "Area mm²")
+        tree = ttk.Treeview(win, columns=cols, show="headings")
+        for c in cols:
+            tree.heading(c, text=c)
+            w = 80 if c == "AWG" else 100
+            tree.column(c, width=w, anchor="center")
+        ysb = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=ysb.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        ysb.grid(row=0, column=1, sticky="ns")
+        win.columnconfigure(0, weight=1)
+        win.rowconfigure(0, weight=1)
+        for g, a in AWG_TABLE:
+            tree.insert("", "end", values=(f"AWG{awg_str(g)}", f"{a:.4f}"))
     def build_inputs_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Inputs")
         input_keys = [k for k in self.model["input"].keys() if k not in ("force_dcm",)]
@@ -624,8 +677,8 @@ class App(tk.Tk):
         return cfg
     def compute(self):
         if not HAVE_CORE:
-            messagebox.showerror("Import error", "Cannot import flyback_design_v12.py\
-"+IMPORT_ERR); return
+            messagebox.showerror("Import error", "Cannot import flyback_design.py\n"+IMPORT_ERR)
+            return
         try:
             cfg = self.collect_cfg();
             cfg_norm = normalize_cfg(cfg)
