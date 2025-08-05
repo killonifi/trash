@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 GUI for Flyback Design Tool v12 (DCM)
-- Tabs: Inputs, Outputs, Core, Geometry, Clamp, MOSFET, Steinmetz, K-Optimizer, Core Library, Results
+- Tabs: Inputs, Outputs, Core, Geometry, Clamp, MOSFET, K-Optimizer, Results
 - Outputs managed via table + Add/Edit/Remove dialogs
-- Core Library tab shows a table of distributor parts; hover shows tooltip with parameters; double-click to apply
+- Core and MOSFET libraries can be opened from respective tabs; double-click an entry to apply
 - K-Optimizer: choose criterion (min Vds / min Ipk / min VRRM / min total loss), scan D(Vin_min) range, apply best
 """
 import tkinter as tk
@@ -21,6 +21,7 @@ except Exception as e:
     HAVE_CORE = False
     IMPORT_ERR = str(e)
 LIB_DEFAULT = "core_library_v5_with_waveforms.json"
+MOS_LIB_DEFAULT = "mosfet_library.json"
 class Tooltip(tk.Toplevel):
     def __init__(self, widget, text="", **kw):
         super().__init__(widget, **kw)
@@ -55,6 +56,285 @@ class OutputDialog(tk.Toplevel):
             messagebox.showerror("Error", "name, Vout, Iout are required"); return
         self.result = d; self.destroy()
     def cancel(self): self.result=None; self.destroy()
+
+class CoreEditDialog(tk.Toplevel):
+    def __init__(self, master, data=None):
+        super().__init__(master)
+        self.title("Core editor")
+        self.result=None
+        fields=["distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped","k","alpha","beta"]
+        self.vars={k: tk.StringVar() for k in fields}
+        self.k_unit_var = tk.StringVar(value="W/kg")
+        if data:
+            for k in fields:
+                v = data.get(k)
+                if v is not None:
+                    self.vars[k].set(str(v))
+            st = data.get("steinmetz")
+            if isinstance(st, dict):
+                for k in ["k","alpha","beta"]:
+                    if st.get(k) is not None:
+                        self.vars[k].set(str(st[k]))
+                if st.get("k_unit"):
+                    self.k_unit_var.set(st["k_unit"])
+        frm = ttk.Frame(self, padding=10); frm.pack(fill="both", expand=True)
+        labels=[
+            ("Distributor","distributor"),("SKU","distributor_sku"),("Vendor","vendor"),("Series","series"),("Size","size"),("Material","material"),
+            ("Ae [mm²]","Ae_mm2"),("le [mm]","le_mm"),("Ve [mm³]","Ve_mm3"),("Aw [mm²]","Aw_mm2"),("Bmax [T]","Bmax_T"),("AL [nH/turn²]","AL_nH_per_turn2_ungapped"),
+            ("k","k"),("alpha","alpha"),("beta","beta")
+        ]
+        row=0
+        for lbl,key in labels:
+            ttk.Label(frm, text=lbl).grid(row=row, column=0, sticky="w", pady=2)
+            if key=="k":
+                ttk.Entry(frm, textvariable=self.vars[key], width=20).grid(row=row, column=1, sticky="w", pady=2)
+                ttk.Combobox(frm, textvariable=self.k_unit_var, values=["W/m3","W/kg"], width=6, state="readonly").grid(row=row, column=2, sticky="w", padx=4)
+            else:
+                ttk.Entry(frm, textvariable=self.vars[key], width=22).grid(row=row, column=1, columnspan=2, sticky="w", pady=2)
+            row+=1
+        btns = ttk.Frame(frm); btns.grid(row=row, column=0, columnspan=3, pady=8)
+        ttk.Button(btns, text="OK", command=self.ok).pack(side="left", padx=5)
+        ttk.Button(btns, text="Cancel", command=self.cancel).pack(side="left", padx=5)
+    def ok(self):
+        d = {k: self.vars[k].get().strip() or None for k in self.vars}
+        st = {"k": d.pop("k", None), "alpha": d.pop("alpha", None), "beta": d.pop("beta", None), "k_unit": self.k_unit_var.get()}
+        d["steinmetz"] = st
+        # convert numeric fields
+        for k in ["Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped"]:
+            if d.get(k) not in (None, ""):
+                try: d[k] = float(d[k])
+                except: pass
+        for k in ["k","alpha","beta"]:
+            if st.get(k) not in (None, ""):
+                try: st[k] = float(st[k])
+                except: pass
+        self.result=d
+        self.destroy()
+    def cancel(self):
+        self.result=None
+        self.destroy()
+
+class MosfetEditDialog(tk.Toplevel):
+    def __init__(self, master, data=None):
+        super().__init__(master)
+        self.title("MOSFET editor")
+        self.result=None
+        fields=["name","vds_V","rds_on_mohm","qg_nC","coss_pF","tr_ns","tf_ns","vgate_V","rds_temp_C","rds_temp_coeff","k_sw_overlap"]
+        self.vars={k: tk.StringVar() for k in fields}
+        if data:
+            for k in fields:
+                v=data.get(k)
+                if v is not None:
+                    self.vars[k].set(str(v))
+        frm = ttk.Frame(self, padding=10); frm.pack(fill="both", expand=True)
+        row=0
+        for lbl,key in [
+            ("Name","name"),("Vds max [V]","vds_V"),("Rds_on [mΩ]","rds_on_mohm"),("Qg [nC]","qg_nC"),("Coss [pF]","coss_pF"),("tr [ns]","tr_ns"),("tf [ns]","tf_ns"),("Vgate [V]","vgate_V"),("Rds temp [°C]","rds_temp_C"),("Rds temp coeff","rds_temp_coeff"),("k_sw_overlap","k_sw_overlap")]:
+            ttk.Label(frm, text=lbl).grid(row=row, column=0, sticky="w", pady=2)
+            ttk.Entry(frm, textvariable=self.vars[key], width=22).grid(row=row, column=1, sticky="w", pady=2)
+            row+=1
+        btns = ttk.Frame(frm); btns.grid(row=row, column=0, columnspan=2, pady=8)
+        ttk.Button(btns, text="OK", command=self.ok).pack(side="left", padx=5)
+        ttk.Button(btns, text="Cancel", command=self.cancel).pack(side="left", padx=5)
+    def ok(self):
+        d = {k: self.vars[k].get().strip() or None for k in self.vars}
+        for k in d:
+            if k!="name" and d[k] not in (None, ""):
+                try: d[k] = float(d[k])
+                except: pass
+        self.result=d
+        self.destroy()
+    def cancel(self):
+        self.result=None
+        self.destroy()
+
+class CoreLibraryWindow(tk.Toplevel):
+    def __init__(self, master, apply_cb):
+        super().__init__(master)
+        self.title("Core library")
+        self.apply_cb = apply_cb
+        self.path = LIB_DEFAULT
+        self.filter_var = tk.StringVar()
+        top = ttk.Frame(self, padding=6); top.pack(fill="x")
+        ttk.Button(top, text="Load...", command=self.load_file).pack(side="left")
+        ttk.Button(top, text="Save", command=self.save_file).pack(side="left", padx=4)
+        ttk.Button(top, text="Use selected", command=self.use_selected).pack(side="left", padx=4)
+        ttk.Label(top, text="Filter").pack(side="right")
+        ttk.Entry(top, textvariable=self.filter_var, width=20).pack(side="right", padx=4)
+        self.filter_var.trace_add('write', lambda *a: self.apply_filter())
+        cols=("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped")
+        self.cols = cols
+        self.tree = ttk.Treeview(self, columns=cols, show="headings")
+        for c in cols:
+            self.tree.heading(c, text=c)
+            w = 120 if c in ("distributor_sku","size") else 90
+            if c in ("Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped"): w=110
+            self.tree.column(c, width=w, anchor="center", stretch=False)
+        ysb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
+        xsb = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
+        self.tree.pack(fill="both", expand=True)
+        ysb.pack(side="right", fill="y")
+        xsb.pack(side="bottom", fill="x")
+        self.tree.bind("<Double-1>", lambda e: self.use_selected())
+        btns = ttk.Frame(self, padding=6); btns.pack(fill="x")
+        ttk.Button(btns, text="Add", command=self.add_item).pack(side="left")
+        ttk.Button(btns, text="Edit", command=self.edit_item).pack(side="left", padx=4)
+        ttk.Button(btns, text="Remove", command=self.remove_item).pack(side="left", padx=4)
+        self.all_items=[]
+        self.items_by_iid={}
+        if os.path.exists(self.path):
+            self.load_file(initial=True)
+
+    def load_file(self, initial=False):
+        if not initial:
+            path = filedialog.askopenfilename(filetypes=[("JSON","*.json"),("All","*.*")])
+            if not path: return
+            self.path = path
+        data = json.load(open(self.path,"r",encoding="utf-8")) if os.path.exists(self.path) else {"cores":[]}
+        self.all_items = data.get("cores", [])
+        self.apply_filter()
+
+    def save_file(self):
+        json.dump({"cores": self.all_items}, open(self.path,"w",encoding="utf-8"), indent=2)
+        messagebox.showinfo("Saved", self.path)
+
+    def apply_filter(self):
+        txt = self.filter_var.get().lower()
+        for iid in list(self.tree.get_children()):
+            self.tree.delete(iid)
+        self.items_by_iid={}
+        for it in self.all_items:
+            joined = " ".join(str(it.get(k,"")) for k in it.keys()).lower()
+            if txt in joined:
+                vals = ["" if it.get(k) is None else str(it.get(k)) for k in self.cols]
+                iid = self.tree.insert("", "end", values=vals)
+                self.items_by_iid[iid]=it
+
+    def use_selected(self):
+        sel = self.tree.selection()
+        if not sel: return
+        item = self.items_by_iid[sel[0]]
+        self.apply_cb(item)
+        self.destroy()
+
+    def add_item(self):
+        d = CoreEditDialog(self)
+        self.wait_window(d)
+        if d.result:
+            self.all_items.append(d.result)
+            self.apply_filter()
+
+    def edit_item(self):
+        sel = self.tree.selection()
+        if not sel: return
+        item = self.items_by_iid[sel[0]]
+        d = CoreEditDialog(self, data=item)
+        self.wait_window(d)
+        if d.result:
+            idx = self.all_items.index(item)
+            self.all_items[idx] = d.result
+            self.apply_filter()
+
+    def remove_item(self):
+        sel = self.tree.selection()
+        if not sel: return
+        item = self.items_by_iid[sel[0]]
+        self.all_items.remove(item)
+        self.apply_filter()
+
+class MosfetLibraryWindow(tk.Toplevel):
+    def __init__(self, master, apply_cb):
+        super().__init__(master)
+        self.title("MOSFET library")
+        self.apply_cb = apply_cb
+        self.path = MOS_LIB_DEFAULT
+        self.filter_var = tk.StringVar()
+        top = ttk.Frame(self, padding=6); top.pack(fill="x")
+        ttk.Button(top, text="Load...", command=self.load_file).pack(side="left")
+        ttk.Button(top, text="Save", command=self.save_file).pack(side="left", padx=4)
+        ttk.Button(top, text="Use selected", command=self.use_selected).pack(side="left", padx=4)
+        ttk.Label(top, text="Filter").pack(side="right")
+        ttk.Entry(top, textvariable=self.filter_var, width=20).pack(side="right", padx=4)
+        self.filter_var.trace_add('write', lambda *a: self.apply_filter())
+        cols=("name","vds_V","rds_on_mohm","qg_nC","coss_pF","tr_ns","tf_ns","vgate_V","rds_temp_C","rds_temp_coeff","k_sw_overlap")
+        self.cols=cols
+        self.tree=ttk.Treeview(self, columns=cols, show="headings")
+        for c in cols:
+            self.tree.heading(c, text=c)
+            self.tree.column(c, width=100, anchor="center", stretch=False)
+        ysb=ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
+        xsb=ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
+        self.tree.pack(fill="both", expand=True)
+        ysb.pack(side="right", fill="y")
+        xsb.pack(side="bottom", fill="x")
+        self.tree.bind("<Double-1>", lambda e: self.use_selected())
+        btns = ttk.Frame(self, padding=6); btns.pack(fill="x")
+        ttk.Button(btns, text="Add", command=self.add_item).pack(side="left")
+        ttk.Button(btns, text="Edit", command=self.edit_item).pack(side="left", padx=4)
+        ttk.Button(btns, text="Remove", command=self.remove_item).pack(side="left", padx=4)
+        self.all_items=[]
+        self.items_by_iid={}
+        if os.path.exists(self.path):
+            self.load_file(initial=True)
+
+    def load_file(self, initial=False):
+        if not initial:
+            path = filedialog.askopenfilename(filetypes=[("JSON","*.json"),("All","*.*")])
+            if not path: return
+            self.path = path
+        data = json.load(open(self.path,"r",encoding="utf-8")) if os.path.exists(self.path) else {"mosfets":[]}
+        self.all_items = data.get("mosfets", [])
+        self.apply_filter()
+
+    def save_file(self):
+        json.dump({"mosfets": self.all_items}, open(self.path,"w",encoding="utf-8"), indent=2)
+        messagebox.showinfo("Saved", self.path)
+
+    def apply_filter(self):
+        txt = self.filter_var.get().lower()
+        for iid in list(self.tree.get_children()):
+            self.tree.delete(iid)
+        self.items_by_iid={}
+        for it in self.all_items:
+            joined = " ".join(str(it.get(k,"")) for k in it.keys()).lower()
+            if txt in joined:
+                vals=["" if it.get(k) is None else str(it.get(k)) for k in self.cols]
+                iid=self.tree.insert("", "end", values=vals)
+                self.items_by_iid[iid]=it
+
+    def use_selected(self):
+        sel=self.tree.selection()
+        if not sel: return
+        item=self.items_by_iid[sel[0]]
+        self.apply_cb(item)
+        self.destroy()
+
+    def add_item(self):
+        d=MosfetEditDialog(self)
+        self.wait_window(d)
+        if d.result:
+            self.all_items.append(d.result)
+            self.apply_filter()
+
+    def edit_item(self):
+        sel=self.tree.selection()
+        if not sel: return
+        item=self.items_by_iid[sel[0]]
+        d=MosfetEditDialog(self, data=item)
+        self.wait_window(d)
+        if d.result:
+            idx=self.all_items.index(item)
+            self.all_items[idx]=d.result
+            self.apply_filter()
+
+    def remove_item(self):
+        sel=self.tree.selection()
+        if not sel: return
+        item=self.items_by_iid[sel[0]]
+        self.all_items.remove(item)
+        self.apply_filter()
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -88,9 +368,7 @@ class App(tk.Tk):
         self.build_geom_tab()
         self.build_clamp_tab()
         self.build_mosfet_tab()
-        self.build_stein_tab()
         self.build_k_tab()
-        self.build_library_tab()
         self.build_results_tab()
         self.create_menu()
     def create_menu(self):
@@ -98,8 +376,6 @@ class App(tk.Tk):
         fm = tk.Menu(m, tearoff=0)
         fm.add_command(label="Load JSON...", command=self.load_json)
         fm.add_command(label="Save JSON...", command=self.save_json)
-        fm.add_separator()
-        fm.add_command(label="Load Core Library...", command=self.load_library)
         fm.add_separator()
         fm.add_command(label="Compute", command=self.compute)
         fm.add_separator()
@@ -174,11 +450,26 @@ class App(tk.Tk):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Core")
         core = self.model["core"]
         self.core_vars = {k: tk.StringVar(value=str(core.get(k,""))) for k in ["ae_mm2","le_mm","bmax_T","core_volume_mm3","al_nH_per_turn2"]}
+        s = self.model.get("steinmetz", {})
+        self.st_vars = {k: tk.StringVar(value=str(s.get(k,""))) for k in ["k","alpha","beta"]}
+        self.st_unit_var = tk.StringVar(value=s.get("k_unit","W/kg"))
         grid = ttk.Frame(tab, padding=10); grid.pack(fill="both", expand=True)
+        ttk.Button(grid, text="Choose from library", command=self.open_core_library).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0,6))
         labels=[("Ae [mm²]","ae_mm2"),("le [mm]","le_mm"),("Bmax [T]","bmax_T"),("Core volume [mm³]","core_volume_mm3"),("AL [nH/turn²] (opt)","al_nH_per_turn2")]
-        for r,(lbl,k) in enumerate(labels):
+        start=1
+        for r,(lbl,k) in enumerate(labels, start=start):
             ttk.Label(grid, text=lbl).grid(row=r, column=0, sticky="w", pady=3)
             ttk.Entry(grid, textvariable=self.core_vars[k], width=20).grid(row=r, column=1, sticky="w", pady=3)
+        row = start + len(labels)
+        ttk.Label(grid, text="Steinmetz k").grid(row=row, column=0, sticky="w", pady=3)
+        ttk.Entry(grid, textvariable=self.st_vars["k"], width=20).grid(row=row, column=1, sticky="w", pady=3)
+        ttk.Combobox(grid, textvariable=self.st_unit_var, values=["W/m3","W/kg"], width=6, state="readonly").grid(row=row, column=2, sticky="w", padx=4)
+        row+=1
+        ttk.Label(grid, text="alpha").grid(row=row, column=0, sticky="w", pady=3)
+        ttk.Entry(grid, textvariable=self.st_vars["alpha"], width=20).grid(row=row, column=1, sticky="w", pady=3)
+        row+=1
+        ttk.Label(grid, text="beta").grid(row=row, column=0, sticky="w", pady=3)
+        ttk.Entry(grid, textvariable=self.st_vars["beta"], width=20).grid(row=row, column=1, sticky="w", pady=3)
     def build_geom_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Geometry/Wire")
         g = self.model["geometry"]
@@ -212,23 +503,39 @@ class App(tk.Tk):
         m = self.model["mosfet"]
         self.mos_vars = {k: tk.StringVar(value=str(m.get(k,""))) for k in ["rds_on_mohm","rds_temp_C","rds_temp_coeff","tr_ns","tf_ns","coss_pF","qg_nC","vgate_V","k_sw_overlap"]}
         grid = ttk.Frame(tab, padding=10); grid.pack(fill="both", expand=True)
+        ttk.Button(grid, text="Choose from library", command=self.open_mosfet_library).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0,6))
         labels=[("Rds_on [mΩ]","rds_on_mohm"),("Tj for Rds [°C]","rds_temp_C"),("Rds temp coeff [1/K]","rds_temp_coeff"),
                 ("tr [ns]","tr_ns"),("tf [ns]","tf_ns"),("Coss [pF]","coss_pF"),("Qg [nC]","qg_nC"),("Vgate [V]","vgate_V"),("k_sw_overlap","k_sw_overlap")]
-        for r,(lbl,k) in enumerate(labels):
+        start=1
+        for r,(lbl,k) in enumerate(labels, start=start):
             ttk.Label(grid, text=lbl).grid(row=r, column=0, sticky="w", pady=3)
             ttk.Entry(grid, textvariable=self.mos_vars[k], width=20).grid(row=r, column=1, sticky="w", pady=3)
-    def build_stein_tab(self):
-        tab = ttk.Frame(self.nb); self.nb.add(tab, text="Steinmetz")
-        s = self.model["steinmetz"]
-        self.st_vars = {k: tk.StringVar(value=str(s.get(k,""))) for k in ["k","alpha","beta"]}
-        self.st_unit_var = tk.StringVar(value=s.get("k_unit","W/m3"))
-        grid = ttk.Frame(tab, padding=10); grid.pack(fill="both", expand=True)
-        ttk.Label(grid, text="k").grid(row=0, column=0, sticky="w", pady=3)
-        ttk.Entry(grid, textvariable=self.st_vars["k"], width=20).grid(row=0, column=1, sticky="w", pady=3)
-        ttk.Combobox(grid, textvariable=self.st_unit_var, values=["W/m3","W/kg"], width=6, state="readonly").grid(row=0, column=2, sticky="w", padx=4)
-        for r,(lbl,k) in enumerate([("alpha","alpha"),("beta","beta")], start=1):
-            ttk.Label(grid, text=lbl).grid(row=r, column=0, sticky="w", pady=3)
-            ttk.Entry(grid, textvariable=self.st_vars[k], width=20).grid(row=r, column=1, sticky="w", pady=3)
+    def open_core_library(self):
+        CoreLibraryWindow(self, self.apply_core_from_library)
+    def open_mosfet_library(self):
+        MosfetLibraryWindow(self, self.apply_mosfet_from_library)
+    def apply_core_from_library(self, item):
+        mapping = {"ae_mm2": item.get("Ae_mm2"), "le_mm": item.get("le_mm"), "bmax_T": item.get("Bmax_T"), "al_nH_per_turn2": item.get("AL_nH_per_turn2_ungapped")}
+        for k,v in mapping.items():
+            if v is not None and k in self.core_vars:
+                self.core_vars[k].set(str(v))
+        ve = item.get("Ve_mm3")
+        if ve is not None:
+            self.core_vars["core_volume_mm3"].set(str(ve))
+        st = item.get("steinmetz")
+        if isinstance(st, dict):
+            for k in ["k","alpha","beta"]:
+                v = st.get(k)
+                if v is not None:
+                    self.st_vars[k].set(str(v))
+            unit = st.get("k_unit")
+            if unit:
+                self.st_unit_var.set(unit)
+    def apply_mosfet_from_library(self, item):
+        for k in self.mos_vars:
+            v = item.get(k)
+            if v is not None:
+                self.mos_vars[k].set(str(v))
     def build_k_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="K-Optimizer")
         self.k_vars = {"criterion": tk.StringVar(value=self.model["k_optimize"].get("criterion","min_vds")),
@@ -259,77 +566,6 @@ class App(tk.Tk):
         xsb.grid(row=1, column=0, sticky="ew")
         result_frame.columnconfigure(0, weight=1)
         result_frame.rowconfigure(0, weight=1)
-    def build_library_tab(self):
-        tab = ttk.Frame(self.nb); self.nb.add(tab, text="Core Library")
-        top = ttk.Frame(tab, padding=6); top.pack(fill="x")
-        ttk.Button(top, text="Load library...", command=self.load_library).pack(side="left")
-        ttk.Button(top, text="Use selected", command=self.use_selected_core).pack(side="left", padx=6)
-        ttk.Label(top, text="(double-click row to apply)").pack(side="left", padx=6)
-        cols=("distributor","distributor_sku","vendor","series","size","material","Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped")
-        self.core_cols = cols
-        self.core_items: Dict[str, Any] = {}
-        table = ttk.Frame(tab)
-        table.pack(fill="both", expand=True, padx=6, pady=6)
-        self.core_tree = ttk.Treeview(table, columns=cols, show="headings")
-        for c in cols:
-            self.core_tree.heading(c, text=c)
-            w = 120 if c in ("distributor_sku","size") else 90
-            if c in ("Ae_mm2","le_mm","Ve_mm3","Aw_mm2","Bmax_T","AL_nH_per_turn2_ungapped"): w=110
-            self.core_tree.column(c, width=w, anchor="center", stretch=False)
-        ysb = ttk.Scrollbar(table, orient="vertical", command=self.core_tree.yview)
-        xsb = ttk.Scrollbar(table, orient="horizontal", command=self.core_tree.xview)
-        self.core_tree.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
-        self.core_tree.grid(row=0, column=0, sticky="nsew")
-        ysb.grid(row=0, column=1, sticky="ns")
-        xsb.grid(row=1, column=0, sticky="ew")
-        table.columnconfigure(0, weight=1)
-        table.rowconfigure(0, weight=1)
-        self.core_tree.bind("<Double-1>", lambda e: self.use_selected_core())
-        self.core_tree.bind("<Motion>", self.on_core_hover)
-        self.tooltip=None
-        if os.path.exists(LIB_DEFAULT):
-            try:
-                data = json.load(open(LIB_DEFAULT, "r", encoding="utf-8"))
-                for it in data.get("cores", []):
-                    vals = ["" if it.get(k) is None else str(it.get(k)) for k in self.core_cols]
-                    iid = self.core_tree.insert("", "end", values=vals)
-                    self.core_items[iid] = it
-            except Exception as e:
-                messagebox.showwarning("Library", str(e))
-    def on_core_hover(self, event):
-        iid = self.core_tree.identify_row(event.y)
-        if not iid:
-            if self.tooltip: self.tooltip.destroy(); self.tooltip=None
-            return
-        vals = self.core_tree.item(iid, "values")
-        text = ("Поставщик: %s\nАртикул: %s\nПроизводитель: %s\nСерия: %s  Размер: %s  Материал: %s\nAe= %s мм², le= %s мм, Ve= %s мм³, Aw= %s мм², Bmax= %s Т, AL≈ %s нГн/вит²" % (vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7], vals[8], vals[9], vals[10], vals[11]))
-        if self.tooltip: self.tooltip.destroy()
-        self.tooltip = Tooltip(self.core_tree, text=text)
-        x=self.core_tree.winfo_rootx()+event.x+20
-        y=self.core_tree.winfo_rooty()+event.y+10
-        self.tooltip.wm_geometry("+%d+%d"%(x,y))
-    def use_selected_core(self):
-        sel = self.core_tree.selection()
-        if not sel: return
-        iid = sel[0]
-        vals = self.core_tree.item(iid, "values")
-        mapping = {"ae_mm2": vals[6], "le_mm": vals[7], "bmax_T": vals[10], "al_nH_per_turn2": vals[11]}
-        for k, v in mapping.items():
-            if k in self.core_vars:
-                self.core_vars[k].set(str(v))
-        item = self.core_items.get(iid, {})
-        ve = item.get("Ve_mm3")
-        if ve is not None:
-            self.core_vars["core_volume_mm3"].set(str(ve))
-        st = item.get("steinmetz")
-        if isinstance(st, dict):
-            for k in ["k", "alpha", "beta"]:
-                v = st.get(k)
-                if v is not None and k in self.st_vars:
-                    self.st_vars[k].set(str(v))
-            unit = st.get("k_unit")
-            if unit:
-                self.st_unit_var.set(unit)
     def build_results_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Results")
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
@@ -443,20 +679,6 @@ class App(tk.Tk):
         Dbest = self.sweep_cache["best"]["D"]
         self.inputs_vars["duty_max"].set(f"{Dbest:.4f}")
         messagebox.showinfo("K-optimizer", f"Применено: D(Vin_min)={Dbest:.3f}. Пересчитайте (Compute).")
-    def load_library(self):
-        path = filedialog.askopenfilename(filetypes=[("JSON","*.json"),("All","*.*")], initialfile=LIB_DEFAULT)
-        if not path: return
-        try:
-            data = json.load(open(path,"r",encoding="utf-8"))
-            self.core_items.clear()
-            for iid in self.core_tree.get_children():
-                self.core_tree.delete(iid)
-            for it in data.get("cores", []):
-                vals = ["" if it.get(k) is None else str(it.get(k)) for k in self.core_cols]
-                iid = self.core_tree.insert("", "end", values=vals)
-                self.core_items[iid] = it
-        except Exception as e:
-            messagebox.showerror("Library", str(e))
     def show_results(self, res: Dict[str, Any]):
         self.res_text.delete("1.0","end")
         lines = []
@@ -563,11 +785,9 @@ class App(tk.Tk):
                         break
             cfg["core"] = core
             self.model = cfg
-
-            self.model = cfg
             for w in self.nb.winfo_children(): w.destroy()
             self.build_inputs_tab(); self.build_outputs_tab(); self.build_core_tab()
-            self.build_geom_tab(); self.build_clamp_tab(); self.build_mosfet_tab(); self.build_stein_tab(); self.build_k_tab(); self.build_library_tab(); self.build_results_tab()
+            self.build_geom_tab(); self.build_clamp_tab(); self.build_mosfet_tab(); self.build_k_tab(); self.build_results_tab()
         except Exception as e:
             messagebox.showerror("Load JSON error", str(e))
     def save_report(self):
