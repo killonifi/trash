@@ -373,12 +373,13 @@ class App(tk.Tk):
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure("TButton", padding=6)
-        style.configure("Accent.TButton", padding=6, foreground="white", background="#0078D7")
-        style.map("Accent.TButton", background=[('active', '#005A9E')])
+        style.configure("TButton", padding=6, relief="flat")
+        style.configure("Accent.TButton", padding=6, foreground="white", background="#0078D7", relief="flat")
+        style.map("Accent.TButton", background=[("active", "#005A9E")])
         style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
+        style.configure("Info.TLabel", foreground="#0078D7")
         self.option_add("*Font", "{Segoe UI} 10")
-        
+
         topbar = ttk.Frame(self); topbar.pack(fill="x")
         ttk.Label(topbar, text="Topology:").pack(side="left", padx=4)
         self.topology_var = tk.StringVar(value="Flyback")
@@ -386,13 +387,14 @@ class App(tk.Tk):
                                values=list(DESIGN_MAP.keys()), state="readonly", width=14)
         topo_cb.pack(side="left")
         topo_cb.bind("<<ComboboxSelected>>", self.change_topology)
+        ttk.Button(topbar, text="Compute", command=self.compute, style="Accent.TButton").pack(side="right", padx=4)
         self.design_cls = DESIGN_MAP[self.topology_var.get()]
         self.design = self.design_cls()
 
         nb = ttk.Notebook(self); nb.pack(fill="both", expand=True)
         self.nb = nb
         self.model: Dict[str, Any] = {
-            "input": {"vin_min":"90","vin_max":"265","fsw":"100k","duty_max":"0.45","eff":"0.88","input_type":"dc","f_line":"50","overload":"1.2","main_output":"","cin_vrip":"5","force_dcm": False},
+            "input": {"vin_min":"90","vin_max":"265","fsw":"100k","duty_max":"0.45","eff":"0.88","input_type":"dc","f_line":"50","overload":"1.2","main_output":"","cin_vrip":"5","min_load_pct":"10","force_dcm": False},
             "outputs": [{"name":"12V","v":"12","i":"5","ripple_v":"0.06","diode_drop":"0.5","mlt_mm":"40"}],
             "core": {"ae_mm2":"58","le_mm":"57","bmax_T":"0.20","core_volume_mm3":"3310"},
             "geometry": {"jmax_A_per_mm2":"4.0","mlt_pri_mm":"40","mlt_sec_default_mm":"40","window_area_mm2":"70","copper_temp_C":"60","ac_factor_pri":"1.5","ac_factor_sec":"1.5"},
@@ -464,33 +466,68 @@ class App(tk.Tk):
             return
         for g, a in table:
             tree.insert("", "end", values=(f"AWG{self.design.awg_str(g)}", f"{a:.4f}"))
+
+    def add_tooltip(self, widget, text: str):
+        tip = Tooltip(widget, text=text)
+        tip.withdraw()
+
+        def enter(e):
+            tip.deiconify()
+            tip.wm_geometry(f"+{e.x_root + 10}+{e.y_root + 10}")
+
+        def leave(e):
+            tip.withdraw()
+
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
     def build_inputs_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Inputs")
         input_keys = [k for k in self.model["input"].keys() if k not in ("force_dcm",)]
         self.inputs_vars = {k: tk.StringVar(value=str(self.model["input"].get(k,""))) for k in input_keys}
         self.force_dcm_var = tk.BooleanVar(value=bool(self.model["input"].get("force_dcm", False)))
         grid = ttk.Frame(tab, padding=10); grid.pack(fill="both", expand=True)
-        labels=[("Vin_min [V]","vin_min"),("Vin_max [V]","vin_max"),("fsw [Hz]","fsw"),("Dmax","duty_max"),
-                ("eff","eff"),("Input type","input_type"),("f_line [Hz]","f_line"),
-                ("overload","overload"),("main_output name","main_output"),("Cin ripple [Vpp]","cin_vrip")]
-        row=0
-        for lbl,key in labels:
+        labels = [
+            ("Vin min [V]", "vin_min", "Minimum input voltage"),
+            ("Vin max [V]", "vin_max", "Maximum input voltage"),
+            ("f_sw [Hz]", "fsw", "Switching frequency"),
+            ("Duty max", "duty_max", "Maximum duty cycle at Vin_min"),
+            ("Efficiency", "eff", "Expected efficiency"),
+            ("Input type", "input_type", None),
+            ("Line freq [Hz]", "f_line", "AC line frequency"),
+            ("Overload factor", "overload", "Allowable overload"),
+            ("Main output name", "main_output", "Name of main output"),
+            ("Cin ripple [Vpp]", "cin_vrip", "Allowed input capacitor ripple"),
+            ("Min Load [%]", "min_load_pct", "Minimum load for calculations"),
+        ]
+        row = 0
+        for lbl, key, tip in labels:
             if key == "f_line":
-                self.f_line_label = ttk.Label(grid, text=lbl)
+                self.f_line_label = ttk.Frame(grid)
                 self.f_line_label.grid(row=row, column=0, sticky="w", pady=3)
+                ttk.Label(self.f_line_label, text=lbl).pack(side="left")
+                if tip:
+                    info = ttk.Label(self.f_line_label, text="?", style="Info.TLabel")
+                    info.pack(side="left", padx=2)
+                    self.add_tooltip(info, tip)
                 self.f_line_entry = ttk.Entry(grid, textvariable=self.inputs_vars[key], width=20)
                 self.f_line_entry.grid(row=row, column=1, sticky="w", pady=3)
             else:
-                ttk.Label(grid, text=lbl).grid(row=row, column=0, sticky="w", pady=3)
+                lf = ttk.Frame(grid)
+                lf.grid(row=row, column=0, sticky="w", pady=3)
+                ttk.Label(lf, text=lbl).pack(side="left")
+                if tip:
+                    info = ttk.Label(lf, text="?", style="Info.TLabel")
+                    info.pack(side="left", padx=2)
+                    self.add_tooltip(info, tip)
                 if key == "input_type":
                     self.input_type_cb = ttk.Combobox(
-                        grid, textvariable=self.inputs_vars[key], values=("dc","ac"), state="readonly", width=18
+                        grid, textvariable=self.inputs_vars[key], values=("dc", "ac"), state="readonly", width=18
                     )
                     self.input_type_cb.grid(row=row, column=1, sticky="w", pady=3)
                     self.input_type_cb.bind("<<ComboboxSelected>>", self.update_f_line_visibility)
                 else:
                     ttk.Entry(grid, textvariable=self.inputs_vars[key], width=20).grid(row=row, column=1, sticky="w", pady=3)
-            row+=1
+            row += 1
         ttk.Checkbutton(grid, text="Force DCM", variable=self.force_dcm_var).grid(row=row, column=0, sticky="w", pady=3)
         self.update_f_line_visibility()
 
@@ -771,7 +808,7 @@ class App(tk.Tk):
         lines.append(f"D(Vin_min) = {ini['d_vin_min']:.3f}")
         lines.append(f"D(Vin_max) = {ini['d_vin_max']:.3f}")
         lines.append(f"K(Np/Ns) main = {ini['k_np_over_ns']:.3f}")
-        lines.append(f"Vref = {ini['vref_V']:.2f} V")
+        lines.append(f"Vref (Reflected Voltage) = {ini['vref_V']:.2f} V")
         lines.append(f"VDS_ideal_max = {ini['vds_ideal_max_V']:.2f} V")
         for name, c in ini["cout_min_each_F"].items():
             lines.append(f"Cout_min[{name}] = {c:.6e} F")
@@ -847,6 +884,13 @@ class App(tk.Tk):
             lines.append("")
             lines.append("(Этап 2 не выполнен — задайте Core и Geometry)")
         self.res_text.insert("1.0", "\n".join(lines))
+        self.res_text.tag_config("warning", foreground="red")
+        self.res_text.tag_config("key", foreground="#0078D7")
+        for idx, line in enumerate(lines, start=1):
+            if line.startswith("!"):
+                self.res_text.tag_add("warning", f"{idx}.0", f"{idx}.end")
+            if line.startswith("η_est"):
+                self.res_text.tag_add("key", f"{idx}.0", f"{idx}.end")
     def save_json(self):
         cfg = self.collect_cfg()
         path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON","*.json"),("All","*.*")])
