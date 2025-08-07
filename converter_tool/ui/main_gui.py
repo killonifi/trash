@@ -462,10 +462,10 @@ class App(tk.Tk):
                                values=list(DESIGN_MAP.keys()), state="readonly", width=14)
         topo_cb.pack(side="left")
         topo_cb.bind("<<ComboboxSelected>>", self.change_topology)
-        ttk.Button(topbar, text="ChatGPT", command=self.open_chat).pack(side="right", padx=4)
+        center = ttk.Frame(topbar)
+        center.pack(side="left", expand=True, fill="x")
+        ttk.Button(center, text="ChatGPT", command=self.open_chat).pack()
         ttk.Button(topbar, text="Compute", command=self.compute, style="Accent.TButton").pack(side="right", padx=4)
-        ttk.Button(topbar, text="Redo", command=self.redo).pack(side="right")
-        ttk.Button(topbar, text="Undo", command=self.undo).pack(side="right")
         self.design_cls = DESIGN_MAP[self.topology_var.get()]
         self.design = self.design_cls()
 
