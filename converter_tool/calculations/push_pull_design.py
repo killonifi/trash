@@ -3,10 +3,10 @@ import math
 from typing import Dict, Any
 
 from .base import ConverterDesign
-from .core_utils import parse_num, primary_turns
+from .core_utils import parse_num, core_ss0_min, primary_turns
 
-class HalfBridgeDesign(ConverterDesign):
-    """Half-bridge converter calculations."""
+class PushPullDesign(ConverterDesign):
+    """Two-transistor push-pull converter."""
 
     @staticmethod
     def normalize_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -48,17 +48,19 @@ class HalfBridgeDesign(ConverterDesign):
 
         bmax = core.get("bmax_T")
         ae = core.get("ae_mm2") * 1e-6
+        pout = vout * iout
 
-        n_ps = ((vin_min / 2) * d_max) / vout
-        w1 = primary_turns(vin_min / 2, d_max, bmax, ae, fsw)
-        w2 = math.ceil(w1 / n_ps)
-        vds = vin_max
-        ids_rms = (iout * vout) / (vin_min * d_max)
+        n_ps = (vin_min * d_max) / vout
+        w_half = primary_turns(vin_min, d_max, bmax, ae, fsw)
+        w1_total = w_half * 2
+        w2_total = math.ceil(w_half / n_ps) * 2
+        vds = 2 * vin_max
+        ss0 = core_ss0_min(pout, fsw, bmax)
 
         return {
             "turns_ratio": round(n_ps, 3),
-            "primary_turns": w1,
-            "secondary_turns": w2,
+            "primary_turns_total": w1_total,
+            "secondary_turns_total": w2_total,
             "vds_max": vds,
-            "ids_rms_est": round(ids_rms, 2),
+            "SS0_min_cm4": round(ss0, 3),
         }

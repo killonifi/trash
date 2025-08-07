@@ -18,12 +18,14 @@ if __package__ in (None, ""):
 
 from converter_tool.calculations.flyback_design import FlybackDesign
 from converter_tool.calculations.forward_design import ForwardDesign
+from converter_tool.calculations.push_pull_design import PushPullDesign
 from converter_tool.calculations.half_bridge_design import HalfBridgeDesign
 from converter_tool.calculations.full_bridge_design import FullBridgeDesign
 
 DESIGN_MAP = {
     "Flyback": FlybackDesign,
     "Forward": ForwardDesign,
+    "Push-Pull": PushPullDesign,
     "Half-Bridge": HalfBridgeDesign,
     "Full-Bridge": FullBridgeDesign,
 }
@@ -669,8 +671,8 @@ class App(tk.Tk):
         ttk.Label(grid, text="step").grid(row=1, column=4, sticky="w")
         ttk.Entry(grid, textvariable=self.k_vars["dstep"], width=8).grid(row=1, column=5, sticky="w")
         btns = ttk.Frame(tab, padding=8); btns.pack(fill="x")
-        ttk.Button(btns, text="Run sweep", command=self.run_sweep).pack(side="left", padx=5)
-        ttk.Button(btns, text="Apply best K", command=self.apply_best).pack(side="left", padx=5)
+        ttk.Button(btns, text="Run sweep", command=self.run_sweep, style="Accent.TButton").pack(side="left", padx=5)
+        ttk.Button(btns, text="Apply best K", command=self.apply_best, style="Accent.TButton").pack(side="left", padx=5)
         result_frame = ttk.Frame(tab, padding=8)
         result_frame.pack(fill="both", expand=True)
         self.k_result = tk.Text(result_frame, height=16, wrap="none", font=("Consolas", 10))
@@ -686,7 +688,7 @@ class App(tk.Tk):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Results")
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
         ttk.Button(top, text="Compute", command=self.compute, style="Accent.TButton").pack(side="left", padx=4)
-        ttk.Button(top, text="Save report...", command=self.save_report).pack(side="left", padx=4)
+        ttk.Button(top, text="Save report...", command=self.save_report, style="Accent.TButton").pack(side="left", padx=4)
         text_frame = ttk.Frame(tab)
         text_frame.pack(fill="both", expand=True)
         self.res_text = tk.Text(text_frame, wrap="none", font=("Consolas", 10))
@@ -748,6 +750,9 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("Compute error", str(e))
     def run_sweep(self):
+        if not hasattr(self.design, "sweep_k"):
+            messagebox.showinfo("K-optimizer", "Sweep not supported for this topology")
+            return
         try:
             cfg = self.collect_cfg()
             cfg_norm = self.design.normalize_cfg(cfg)
