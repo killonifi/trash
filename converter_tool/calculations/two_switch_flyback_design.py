@@ -6,6 +6,9 @@
 
 from dataclasses import dataclass, asdict
 from math import sqrt
+from typing import Dict, Any
+
+from .core_utils import parse_num
 
 @dataclass
 class TwoSwitchFlybackDesign:
@@ -77,6 +80,52 @@ class TwoSwitchFlybackDesign:
             "V_DS(max) [V]": round(self.V_DS_max, 1),
             "V_P [V]": round(self.V_P, 1),
         }
+
+    # --- совместимость с ConverterDesign интерфейсом ---
+    @staticmethod
+    def normalize_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+        """Приведение строковых значений к числовым типам."""
+        def p(x):
+            try:
+                return parse_num(x)
+            except Exception:
+                return x
+
+        if "input" in cfg:
+            for k in ["vin_min", "vin_max", "fsw", "duty_max", "eff"]:
+                if k in cfg["input"]:
+                    cfg["input"][k] = p(cfg["input"][k])
+        if "outputs" in cfg:
+            for o in cfg["outputs"]:
+                for k in ["v", "i", "diode_drop"]:
+                    if k in o and o[k] is not None:
+                        o[k] = p(o[k])
+        return cfg
+
+    # Поддержка ошибочного имени из старого кода
+    normilize_cfg = normalize_cfg
+
+    def run_calculation(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        """Запуск расчёта через конфигурационный словарь."""
+        cfg = self.normalize_cfg(cfg)
+        inp = cfg.get("input", {})
+        outs = cfg.get("outputs", [])
+        if not outs:
+            raise ValueError("At least one output required")
+
+        main = outs[0]
+        self.V_in_min = inp.get("vin_min", self.V_in_min)
+        self.V_in_max = inp.get("vin_max", self.V_in_max)
+        self.f_sw = inp.get("fsw", self.f_sw)
+        self.D_max = inp.get("duty_max", self.D_max)
+        self.eta = inp.get("eff", self.eta)
+
+        self.V_out = main.get("v", self.V_out)
+        self.V_diode = main.get("diode_drop", self.V_diode)
+        # суммарная мощность по всем выходам
+        self.P_out = sum(o.get("v", 0) * o.get("i", 0) for o in outs) or self.P_out
+
+        return self.calculate()
 
 # --- при автономном запуске выводим пример ---
 if __name__ == "__main__":
