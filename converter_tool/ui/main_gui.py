@@ -18,6 +18,7 @@ if __package__ in (None, ""):
 
 from converter_tool.calculations.flyback_design import FlybackDesign
 from converter_tool.calculations.forward_design import ForwardDesign
+from converter_tool.calculations.two_switch_forward_design import TwoSwitchForwardDesign
 from converter_tool.calculations.push_pull_design import PushPullDesign
 from converter_tool.calculations.half_bridge_design import HalfBridgeDesign
 from converter_tool.calculations.full_bridge_design import FullBridgeDesign
@@ -25,6 +26,7 @@ from converter_tool.calculations.full_bridge_design import FullBridgeDesign
 DESIGN_MAP = {
     "Flyback": FlybackDesign,
     "Forward": ForwardDesign,
+    "2-Switch Forward": TwoSwitchForwardDesign,
     "Push-Pull": PushPullDesign,
     "Half-Bridge": HalfBridgeDesign,
     "Full-Bridge": FullBridgeDesign,
