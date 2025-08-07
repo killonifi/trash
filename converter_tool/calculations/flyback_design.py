@@ -133,6 +133,7 @@ class FlybackInput:
     f_line: float = 50.0
     overload: float = 1.2
     main_output: str = ""
+    min_load_pct: float = 0.0
     force_dcm: bool = False
 
 @dataclass
@@ -494,7 +495,7 @@ def normalize_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
         try: return parse_num(x)
         except: return x
     if "input" in cfg:
-        for k in ["vin_min","vin_max","fsw","duty_max","eff","f_line","overload","cin_vrip"]:
+        for k in ["vin_min","vin_max","fsw","duty_max","eff","f_line","overload","cin_vrip","min_load_pct"]:
             if k in cfg["input"]: cfg["input"][k] = p(cfg["input"][k])
         if "force_dcm" in cfg["input"]:
             v = cfg["input"]["force_dcm"]

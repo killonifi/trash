@@ -802,6 +802,9 @@ class App(tk.Tk):
         messagebox.showinfo("K-optimizer", f"Применено: D(Vin_min)={Dbest:.3f}. Пересчитайте (Compute).")
     def show_results(self, res: Dict[str, Any]):
         self.res_text.delete("1.0","end")
+        if "initial" not in res:
+            self.res_text.insert("1.0", json.dumps(res, indent=2, ensure_ascii=False))
+            return
         lines = []
         ini = res["initial"]
         lines.append("=== ЭТАП 1 (без сердечника) ===")
