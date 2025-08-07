@@ -10,6 +10,7 @@ import json, math, sys, os
 from dataclasses import dataclass, asdict, field
 from typing import List, Optional, Dict, Any
 from .base import ConverterDesign
+from .core_utils import core_ss0_min
 
 MU0 = 4*math.pi*1e-7
 RHO_CU_20 = 1.724e-8
@@ -229,6 +230,8 @@ class RefinedDesign:
     diode_vrrm_ideal_each_V: Dict[str, float]
     diode_vrrm_required_each_V: Dict[str, float]
     fill_factor: Optional[float]
+    ss0_core_cm4: Optional[float]
+    ss0_min_cm4: Optional[float]
     rcd: Optional[Dict[str, Any]]
     core_loss_W: Optional[float]
     losses: Dict[str, Any]
@@ -383,6 +386,15 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
         total_cu = wires["primary_total_area_mm2"] + sum(wires[f"{o.name}_total_area_mm2"] for o in outputs)
         fill_factor = 1.2 * total_cu / geom.window_area_mm2
 
+    ss0_core_cm4 = None
+    ss0_min_cm4 = None
+    if geom.window_area_mm2 and core.ae_mm2:
+        ss0_core_cm4 = (core.ae_mm2 * 1e-2) * (geom.window_area_mm2 * 1e-2)
+        try:
+            ss0_min_cm4 = core_ss0_min(ini.pout_total_W, fin.fsw, core.bmax_T)
+        except Exception:
+            ss0_min_cm4 = None
+
     # Losses
     losses: Dict[str, Any] = {}
     def rho_cu_at(Tc: float) -> float:
@@ -459,7 +471,8 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
         dcm_ok_main=dcm_ok, t_off_main_s=toff, lsec_main_H=lsec_main,
         delta_B_T=dB, wires=wires, vds_ideal_V=vds_ideal, vds_with_overhead_V=vds_required,
         diode_vrrm_ideal_each_V=diode_vrrm_ideal_each, diode_vrrm_required_each_V=diode_vrrm_required_each,
-        fill_factor=fill_factor, rcd=rcd_info, core_loss_W=p_core_W, losses=losses, notes=notes
+        fill_factor=fill_factor, ss0_core_cm4=ss0_core_cm4, ss0_min_cm4=ss0_min_cm4,
+        rcd=rcd_info, core_loss_W=p_core_W, losses=losses, notes=notes
     )
 
 def sweep_k(fin: FlybackInput, outputs: List[OutputSpec], geom: Geometry, core: CoreParameters,

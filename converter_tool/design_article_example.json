@@ -8,7 +8,6 @@
     "input_type": "dc",
     "f_line": 50,
     "overload": 1.2,
-    "main_output": "12V",
     "cin_vrip": 5.0
   },
   "outputs": [

@@ -33,9 +33,17 @@ DESIGN_MAP = {
 }
 
 PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(PACKAGE_DIR, "data")
-LIB_DEFAULT = os.path.join(DATA_DIR, "core_library.json")
-MOS_LIB_DEFAULT = os.path.join(DATA_DIR, "mosfet_library.json")
+LIB_DEFAULT = os.path.join(PACKAGE_DIR, "core_library.json")
+MOS_LIB_DEFAULT = os.path.join(PACKAGE_DIR, "mosfet_library.json")
+IMAGES_DIR = os.path.join(os.path.dirname(__file__), "Images")
+IMAGE_MAP = {
+    "Flyback": "flyback.png",
+    "Forward": "Forward.png",
+    "2-Switch Forward": "Two_switch_forward.png",
+    "Push-Pull": "Push-Pull.png",
+    "Half-Bridge": "Half-bridge.png",
+    "Full-Bridge": "Full-bridge.png",
+}
 EQUATIONS_TEXT = (
     "(1) Vref = D_min/(1−D_min)·Vin_min\n"
     "(2) K = Np/Ns = Vref/(Vout + Vf)\n"
@@ -398,7 +406,7 @@ class App(tk.Tk):
         nb = ttk.Notebook(self); nb.pack(fill="both", expand=True)
         self.nb = nb
         self.model: Dict[str, Any] = {
-            "input": {"vin_min":"90","vin_max":"265","fsw":"100k","duty_max":"0.45","eff":"0.88","input_type":"dc","f_line":"50","overload":"1.2","main_output":"","cin_vrip":"5","min_load_pct":"10","force_dcm": False},
+            "input": {"vin_min":"90","vin_max":"265","fsw":"100k","duty_max":"0.45","eff":"0.88","input_type":"dc","f_line":"50","overload":"1.2","cin_vrip":"5","min_load_pct":"10","force_dcm": False},
             "outputs": [{"name":"12V","v":"12","i":"5","ripple_v":"0.06","diode_drop":"0.5","mlt_mm":"40"}],
             "core": {"ae_mm2":"58","le_mm":"57","bmax_T":"0.20","core_volume_mm3":"3310"},
             "geometry": {"jmax_A_per_mm2":"4.0","mlt_pri_mm":"40","mlt_sec_default_mm":"40","window_area_mm2":"70","copper_temp_C":"60","ac_factor_pri":"1.5","ac_factor_sec":"1.5"},
@@ -437,6 +445,7 @@ class App(tk.Tk):
         self.design_cls = DESIGN_MAP[name]
         self.design = self.design_cls()
         self.title(f"Converter Design Tool - {name}")
+        self.update_topology_image()
     def show_equations(self):
         win = tk.Toplevel(self)
         win.title("Equations")
@@ -489,7 +498,12 @@ class App(tk.Tk):
         input_keys = [k for k in self.model["input"].keys() if k not in ("force_dcm",)]
         self.inputs_vars = {k: tk.StringVar(value=str(self.model["input"].get(k,""))) for k in input_keys}
         self.force_dcm_var = tk.BooleanVar(value=bool(self.model["input"].get("force_dcm", False)))
-        grid = ttk.Frame(tab, padding=10); grid.pack(fill="both", expand=True)
+        container = ttk.Frame(tab)
+        container.pack(fill="both", expand=True)
+        grid = ttk.Frame(container, padding=10); grid.pack(side="left", fill="both", expand=True)
+        img_frame = ttk.Frame(container, padding=10); img_frame.pack(side="right", fill="y")
+        self.topology_image_label = ttk.Label(img_frame)
+        self.topology_image_label.pack()
         labels = [
             ("Vin min [V]", "vin_min", "Minimum input voltage"),
             ("Vin max [V]", "vin_max", "Maximum input voltage"),
@@ -499,7 +513,6 @@ class App(tk.Tk):
             ("Input type", "input_type", None),
             ("Line freq [Hz]", "f_line", "AC line frequency"),
             ("Overload factor", "overload", "Allowable overload"),
-            ("Main output name", "main_output", "Name of main output"),
             ("Cin ripple [Vpp]", "cin_vrip", "Allowed input capacitor ripple"),
             ("Min Load [%]", "min_load_pct", "Minimum load for calculations"),
         ]
@@ -534,6 +547,7 @@ class App(tk.Tk):
             row += 1
         ttk.Checkbutton(grid, text="Force DCM", variable=self.force_dcm_var).grid(row=row, column=0, sticky="w", pady=3)
         self.update_f_line_visibility()
+        self.update_topology_image()
 
     def update_f_line_visibility(self, *args):
         if self.inputs_vars["input_type"].get().lower() == "dc":
@@ -542,6 +556,19 @@ class App(tk.Tk):
         else:
             self.f_line_label.grid()
             self.f_line_entry.grid()
+
+    def update_topology_image(self):
+        name = self.topology_var.get()
+        fname = IMAGE_MAP.get(name)
+        if not fname:
+            return
+        path = os.path.join(IMAGES_DIR, fname)
+        if os.path.exists(path):
+            try:
+                self.topology_image = tk.PhotoImage(file=path)
+                self.topology_image_label.configure(image=self.topology_image)
+            except Exception:
+                pass
     def build_outputs_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Outputs")
         frm = ttk.Frame(tab, padding=10); frm.pack(fill="both", expand=True)
@@ -839,6 +866,10 @@ class App(tk.Tk):
             lines.append(f"VDS ideal = {r['vds_ideal_V']:.2f} V")
             lines.append(f"VDS with clamp = {r['vds_with_overhead_V']:.2f} V")
             lines.append(f"ΔB = {r['delta_B_T']:.3f} T")
+            if r.get('ss0_core_cm4') is not None:
+                lines.append(f"SS0_core = {r['ss0_core_cm4']:.3f} см^4")
+            if r.get('ss0_min_cm4') is not None:
+                lines.append(f"SS0_min = {r['ss0_min_cm4']:.3f} см^4")
             vref = ini['vref_V']
             for o in res["outputs"]:
                 name = o["name"]
