@@ -9,9 +9,11 @@ GUI for converter design tool with multiple topologies.
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-import json, os, sys
+import json, os, sys, re
 from typing import Dict, Any
 from pathlib import Path
+
+import openai
 
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -44,6 +46,7 @@ IMAGE_MAP = {
     "Half-Bridge": "Half-bridge.png",
     "Full-Bridge": "Full-bridge.png",
 }
+OUTPUT_COLS = ("name","v","i","ripple_v","diode_drop","mlt_mm","qrr_nC")
 EQUATIONS_TEXT = (
     "(1) Vref = D_min/(1−D_min)·Vin_min\n"
     "(2) K = Np/Ns = Vref/(Vout + Vf)\n"
@@ -400,6 +403,8 @@ class App(tk.Tk):
         topo_cb.pack(side="left")
         topo_cb.bind("<<ComboboxSelected>>", self.change_topology)
         ttk.Button(topbar, text="Compute", command=self.compute, style="Accent.TButton").pack(side="right", padx=4)
+        ttk.Button(topbar, text="Redo", command=self.redo).pack(side="right")
+        ttk.Button(topbar, text="Undo", command=self.undo).pack(side="right")
         self.design_cls = DESIGN_MAP[self.topology_var.get()]
         self.design = self.design_cls()
 
@@ -422,8 +427,10 @@ class App(tk.Tk):
         self.build_clamp_tab()
         self.build_mosfet_tab()
         self.build_k_tab()
+        self.build_chat_tab()
         self.build_results_tab()
         self.create_menu()
+        self.setup_undo()
     def create_menu(self):
         m = tk.Menu(self)
         fm = tk.Menu(m, tearoff=0)
@@ -574,7 +581,7 @@ class App(tk.Tk):
         frm = ttk.Frame(tab, padding=10); frm.pack(fill="both", expand=True)
         table = ttk.Frame(frm)
         table.pack(fill="both", expand=True, side="left")
-        cols=("name","v","i","ripple_v","diode_drop","mlt_mm","qrr_nC")
+        cols = OUTPUT_COLS
         self.tree = ttk.Treeview(table, columns=cols, show="headings")
         for c in cols:
             self.tree.heading(c, text=c)
@@ -713,6 +720,25 @@ class App(tk.Tk):
         xsb.grid(row=1, column=0, sticky="ew")
         result_frame.columnconfigure(0, weight=1)
         result_frame.rowconfigure(0, weight=1)
+    def build_chat_tab(self):
+        tab = ttk.Frame(self.nb)
+        self.nb.add(tab, text="ChatGPT")
+        key_frame = ttk.Frame(tab, padding=6)
+        key_frame.pack(fill="x")
+        ttk.Label(key_frame, text="API key:").pack(side="left")
+        self.api_key_var = tk.StringVar()
+        ttk.Entry(key_frame, textvariable=self.api_key_var, show="*", width=40).pack(side="left", padx=4)
+        ttk.Button(key_frame, text="Connect", command=self.set_api_key).pack(side="left")
+        chat_frame = ttk.Frame(tab, padding=6)
+        chat_frame.pack(fill="both", expand=True)
+        self.chat_display = tk.Text(chat_frame, state="disabled", wrap="word")
+        self.chat_display.pack(fill="both", expand=True)
+        bottom = ttk.Frame(tab)
+        bottom.pack(fill="x")
+        self.chat_entry = ttk.Entry(bottom)
+        self.chat_entry.pack(side="left", fill="x", expand=True, padx=4, pady=4)
+        self.send_btn = ttk.Button(bottom, text="Send", command=self.send_chat, state="disabled")
+        self.send_btn.pack(side="left", padx=4)
     def build_results_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Results")
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
@@ -732,21 +758,51 @@ class App(tk.Tk):
     def add_output(self):
         d = OutputDialog(self); self.wait_window(d)
         if d.result:
+            idx = len(self.model["outputs"])
             self.model["outputs"].append(d.result)
-            self.tree.insert("", "end", values=[d.result.get(c,"") for c in ("name","v","i","ripple_v","diode_drop","mlt_mm","qrr_nC")])
+            iid = self.tree.insert("", "end", values=[d.result.get(c,"") for c in OUTPUT_COLS])
+            def undo():
+                del self.model["outputs"][idx]
+                self.tree.delete(iid)
+            def redo():
+                self.model["outputs"].insert(idx, d.result)
+                self.tree.insert("", idx, iid=iid, values=[d.result.get(c,"") for c in OUTPUT_COLS])
+            self.undo_stack.append((undo, redo))
+            self.redo_stack.clear()
     def edit_output(self):
         sel = self.tree.selection()
         if not sel: return
-        idx = self.tree.index(sel[0])
+        iid = sel[0]
+        idx = self.tree.index(iid)
         data = self.model["outputs"][idx]
+        old = data.copy()
         d = OutputDialog(self, data=data); self.wait_window(d)
         if d.result:
             self.model["outputs"][idx] = d.result
-            self.tree.item(sel[0], values=[d.result.get(c,"") for c in ("name","v","i","ripple_v","diode_drop","mlt_mm","qrr_nC")])
+            self.tree.item(iid, values=[d.result.get(c,"") for c in OUTPUT_COLS])
+            def undo():
+                self.model["outputs"][idx] = old
+                self.tree.item(iid, values=[old.get(c,"") for c in OUTPUT_COLS])
+            def redo():
+                self.model["outputs"][idx] = d.result
+                self.tree.item(iid, values=[d.result.get(c,"") for c in OUTPUT_COLS])
+            self.undo_stack.append((undo, redo))
+            self.redo_stack.clear()
     def remove_output(self):
         sel = self.tree.selection()
         if not sel: return
-        idx = self.tree.index(sel[0]); del self.model["outputs"][idx]; self.tree.delete(sel[0])
+        iid = sel[0]
+        idx = self.tree.index(iid)
+        data = self.model["outputs"].pop(idx)
+        self.tree.delete(iid)
+        def undo():
+            self.model["outputs"].insert(idx, data)
+            self.tree.insert("", idx, iid=iid, values=[data.get(c,"") for c in OUTPUT_COLS])
+        def redo():
+            del self.model["outputs"][idx]
+            self.tree.delete(iid)
+        self.undo_stack.append((undo, redo))
+        self.redo_stack.clear()
     def collect_cfg(self) -> Dict[str, Any]:
         inp = {k: v.get() for k,v in self.inputs_vars.items()}
         inp["force_dcm"] = bool(self.force_dcm_var.get())
@@ -829,6 +885,95 @@ class App(tk.Tk):
         Dbest = self.sweep_cache["best"]["D"]
         self.inputs_vars["duty_max"].set(f"{Dbest:.4f}")
         messagebox.showinfo("K-optimizer", f"Применено: D(Vin_min)={Dbest:.3f}. Пересчитайте (Compute).")
+    def set_api_key(self):
+        key = self.api_key_var.get().strip()
+        if not key:
+            messagebox.showerror("API key", "Введите API ключ")
+            return
+        openai.api_key = key
+        self.send_btn.config(state="normal")
+        self.chat_entry.config(state="normal")
+    def send_chat(self):
+        msg = self.chat_entry.get().strip()
+        if not msg:
+            return
+        self.chat_entry.delete(0, "end")
+        self.chat_display.config(state="normal")
+        self.chat_display.insert("end", f"Вы: {msg}\n")
+        self.chat_display.config(state="disabled")
+        context = self.collect_cfg()
+        try:
+            resp = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "Ты помощник по проектированию преобразователей. Если хочешь изменить поля, верни JSON с парами поле:значение."},
+                    {"role": "user", "content": msg + "\n" + json.dumps(context, ensure_ascii=False)}
+                ]
+            )
+            reply = resp.choices[0].message["content"]
+        except Exception as e:
+            reply = f"Ошибка: {e}"
+        self.chat_display.config(state="normal")
+        self.chat_display.insert("end", f"ChatGPT: {reply}\n")
+        self.chat_display.config(state="disabled")
+        self.chat_display.see("end")
+        self.handle_chat_changes(reply)
+    def handle_chat_changes(self, text: str):
+        m = re.search(r"```json\s*(\{.*?\})\s*```", text, re.S)
+        if not m:
+            return
+        try:
+            changes = json.loads(m.group(1))
+        except Exception:
+            return
+        for field, val in changes.items():
+            var = self.find_var(field)
+            if var and messagebox.askyesno("Подтвердите", f"Изменить {field} на {val}?"):
+                var.set(str(val))
+    def find_var(self, field: str):
+        for d in [self.inputs_vars, self.core_vars, self.geom_vars, self.mos_vars, self.st_vars, self.rcd_vars]:
+            if field in d:
+                return d[field]
+        return None
+    def setup_undo(self):
+        self.undo_stack = []
+        self.redo_stack = []
+        for d in [self.inputs_vars, self.core_vars, self.geom_vars, self.mos_vars, self.st_vars]:
+            for v in d.values():
+                self._track_var(v)
+        for v in self.rcd_vars.values():
+            self._track_var(v)
+    def _track_var(self, var):
+        var._last = var.get()
+        def cb(*_):
+            new = var.get()
+            old = var._last
+            if new == old:
+                return
+            def undo():
+                var.set(old)
+            def redo():
+                var.set(new)
+            self.undo_stack.append((undo, redo))
+            self.redo_stack.clear()
+            var._last = new
+        var.trace_add('write', cb)
+    def undo(self):
+        if not getattr(self, 'undo_stack', None):
+            return
+        if not self.undo_stack:
+            return
+        undo, redo = self.undo_stack.pop()
+        undo()
+        self.redo_stack.append((redo, undo))
+    def redo(self):
+        if not getattr(self, 'redo_stack', None):
+            return
+        if not self.redo_stack:
+            return
+        redo, undo = self.redo_stack.pop()
+        redo()
+        self.undo_stack.append((undo, redo))
     def show_results(self, res: Dict[str, Any]):
         self.res_text.delete("1.0","end")
         if "initial" not in res:
@@ -957,9 +1102,11 @@ class App(tk.Tk):
                         break
             cfg["core"] = core
             self.model = cfg
-            for w in self.nb.winfo_children(): w.destroy()
+            for w in self.nb.winfo_children():
+                w.destroy()
             self.build_inputs_tab(); self.build_outputs_tab(); self.build_core_tab()
-            self.build_geom_tab(); self.build_clamp_tab(); self.build_mosfet_tab(); self.build_k_tab(); self.build_results_tab()
+            self.build_geom_tab(); self.build_clamp_tab(); self.build_mosfet_tab(); self.build_k_tab(); self.build_chat_tab(); self.build_results_tab()
+            self.setup_undo()
         except Exception as e:
             messagebox.showerror("Load JSON error", str(e))
     def save_report(self):
