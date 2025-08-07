@@ -33,12 +33,12 @@ python -m converter_tool.ui.main_gui
 
 ### ChatGPT integration
 
-The UI now includes a **ChatGPT** tab. Enter your OpenAI API key and you can
-chat with ChatGPT about the current design. The assistant receives the values
-from all tabs (Inputs, Outputs, Core, Geometry, MOSFET, etc.) and can suggest
-changes. Suggested field modifications are only applied after user
-confirmation. Libraries for cores and MOSFETs are also available to the model
-in the context.
+The UI can open a separate **ChatGPT** window from the toolbar. Enter your
+OpenAI API key and you can chat with ChatGPT about the current design. The
+assistant receives the values from all tabs (Inputs, Outputs, Core, Geometry,
+MOSFET, etc.) and can suggest changes. Suggested field modifications are only
+applied after user confirmation. Libraries for cores and MOSFETs are also
+available to the model in the context.
 
 ### Undo/Redo
 

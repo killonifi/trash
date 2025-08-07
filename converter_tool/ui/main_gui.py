@@ -13,7 +13,8 @@ import json, os, sys, re
 from typing import Dict, Any
 from pathlib import Path
 
-import openai
+from collections import deque
+from openai import OpenAI
 
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -65,6 +66,11 @@ EQUATIONS_TEXT = (
     "      P_Coss ≈ 0.5·C_OSS·VDS²·f_sw,    P_gate = Qg·Vg·f_sw\n"
     "(14) Диод  P_cond ≈ Iout·Vf;  P_rr ≈ Qrr·Vrev·f_sw\n"
 )
+
+def add_copy_menu(widget: tk.Widget):
+    menu = tk.Menu(widget, tearoff=0)
+    menu.add_command(label="Copy", command=lambda: widget.event_generate('<<Copy>>'))
+    widget.bind("<Button-3>", lambda e: menu.tk_popup(e.x_root, e.y_root))
 class Tooltip(tk.Toplevel):
     def __init__(self, widget, text="", **kw):
         super().__init__(widget, **kw)
@@ -378,6 +384,60 @@ class MosfetLibraryWindow(tk.Toplevel):
         item=self.items_by_iid[sel[0]]
         self.all_items.remove(item)
         self.apply_filter()
+
+class ChatWindow(tk.Toplevel):
+    def __init__(self, master: tk.Tk):
+        super().__init__(master)
+        self.title("ChatGPT")
+        self.master = master
+        self.client = None
+        key_frame = ttk.Frame(self, padding=6)
+        key_frame.pack(fill="x")
+        ttk.Label(key_frame, text="API key:").pack(side="left")
+        self.api_key_var = tk.StringVar()
+        ttk.Entry(key_frame, textvariable=self.api_key_var, show="*", width=40).pack(side="left", padx=4)
+        ttk.Button(key_frame, text="Connect", command=self.set_api_key).pack(side="left")
+        self.chat_display = tk.Text(self, wrap="word")
+        self.chat_display.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.chat_display.bind("<Key>", lambda e: "break")
+        add_copy_menu(self.chat_display)
+        bottom = ttk.Frame(self)
+        bottom.pack(fill="x")
+        self.chat_entry = ttk.Entry(bottom)
+        self.chat_entry.pack(side="left", fill="x", expand=True, padx=4, pady=4)
+        self.send_btn = ttk.Button(bottom, text="Send", command=self.send_chat, state="disabled")
+        self.send_btn.pack(side="left", padx=4)
+
+    def set_api_key(self):
+        key = self.api_key_var.get().strip()
+        if not key:
+            messagebox.showerror("API key", "Введите API ключ")
+            return
+        self.client = OpenAI(api_key=key)
+        self.send_btn.config(state="normal")
+        self.chat_entry.config(state="normal")
+
+    def send_chat(self):
+        msg = self.chat_entry.get().strip()
+        if not msg:
+            return
+        self.chat_entry.delete(0, "end")
+        self.chat_display.insert("end", f"Вы: {msg}\n")
+        context = self.master.collect_cfg()
+        try:
+            resp = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "Ты помощник по проектированию преобразователей. Если хочешь изменить поля, верни JSON с парами поле:значение."},
+                    {"role": "user", "content": msg + "\n" + json.dumps(context, ensure_ascii=False)}
+                ],
+            )
+            reply = resp.choices[0].message.content
+        except Exception as e:
+            reply = f"Ошибка: {e}"
+        self.chat_display.insert("end", f"ChatGPT: {reply}\n")
+        self.chat_display.see("end")
+        self.master.handle_chat_changes(reply)
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -402,6 +462,7 @@ class App(tk.Tk):
                                values=list(DESIGN_MAP.keys()), state="readonly", width=14)
         topo_cb.pack(side="left")
         topo_cb.bind("<<ComboboxSelected>>", self.change_topology)
+        ttk.Button(topbar, text="ChatGPT", command=self.open_chat).pack(side="right", padx=4)
         ttk.Button(topbar, text="Compute", command=self.compute, style="Accent.TButton").pack(side="right", padx=4)
         ttk.Button(topbar, text="Redo", command=self.redo).pack(side="right")
         ttk.Button(topbar, text="Undo", command=self.undo).pack(side="right")
@@ -427,7 +488,6 @@ class App(tk.Tk):
         self.build_clamp_tab()
         self.build_mosfet_tab()
         self.build_k_tab()
-        self.build_chat_tab()
         self.build_results_tab()
         self.create_menu()
         self.setup_undo()
@@ -446,6 +506,12 @@ class App(tk.Tk):
         info.add_command(label="AWG", command=self.show_awg_table)
         m.add_cascade(label="Info", menu=info)
         self.config(menu=m)
+
+    def open_chat(self):
+        if getattr(self, "chat_win", None) and self.chat_win.winfo_exists():
+            self.chat_win.lift()
+            return
+        self.chat_win = ChatWindow(self)
         
     def change_topology(self, *args):
         name = self.topology_var.get()
@@ -716,29 +782,11 @@ class App(tk.Tk):
         xsb = ttk.Scrollbar(result_frame, orient="horizontal", command=self.k_result.xview)
         self.k_result.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
         self.k_result.grid(row=0, column=0, sticky="nsew")
+        add_copy_menu(self.k_result)
         ysb.grid(row=0, column=1, sticky="ns")
         xsb.grid(row=1, column=0, sticky="ew")
         result_frame.columnconfigure(0, weight=1)
         result_frame.rowconfigure(0, weight=1)
-    def build_chat_tab(self):
-        tab = ttk.Frame(self.nb)
-        self.nb.add(tab, text="ChatGPT")
-        key_frame = ttk.Frame(tab, padding=6)
-        key_frame.pack(fill="x")
-        ttk.Label(key_frame, text="API key:").pack(side="left")
-        self.api_key_var = tk.StringVar()
-        ttk.Entry(key_frame, textvariable=self.api_key_var, show="*", width=40).pack(side="left", padx=4)
-        ttk.Button(key_frame, text="Connect", command=self.set_api_key).pack(side="left")
-        chat_frame = ttk.Frame(tab, padding=6)
-        chat_frame.pack(fill="both", expand=True)
-        self.chat_display = tk.Text(chat_frame, state="disabled", wrap="word")
-        self.chat_display.pack(fill="both", expand=True)
-        bottom = ttk.Frame(tab)
-        bottom.pack(fill="x")
-        self.chat_entry = ttk.Entry(bottom)
-        self.chat_entry.pack(side="left", fill="x", expand=True, padx=4, pady=4)
-        self.send_btn = ttk.Button(bottom, text="Send", command=self.send_chat, state="disabled")
-        self.send_btn.pack(side="left", padx=4)
     def build_results_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Results")
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
@@ -751,6 +799,7 @@ class App(tk.Tk):
         xsb = ttk.Scrollbar(text_frame, orient="horizontal", command=self.res_text.xview)
         self.res_text.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
         self.res_text.grid(row=0, column=0, sticky="nsew")
+        add_copy_menu(self.res_text)
         ysb.grid(row=0, column=1, sticky="ns")
         xsb.grid(row=1, column=0, sticky="ew")
         text_frame.columnconfigure(0, weight=1)
@@ -885,39 +934,6 @@ class App(tk.Tk):
         Dbest = self.sweep_cache["best"]["D"]
         self.inputs_vars["duty_max"].set(f"{Dbest:.4f}")
         messagebox.showinfo("K-optimizer", f"Применено: D(Vin_min)={Dbest:.3f}. Пересчитайте (Compute).")
-    def set_api_key(self):
-        key = self.api_key_var.get().strip()
-        if not key:
-            messagebox.showerror("API key", "Введите API ключ")
-            return
-        openai.api_key = key
-        self.send_btn.config(state="normal")
-        self.chat_entry.config(state="normal")
-    def send_chat(self):
-        msg = self.chat_entry.get().strip()
-        if not msg:
-            return
-        self.chat_entry.delete(0, "end")
-        self.chat_display.config(state="normal")
-        self.chat_display.insert("end", f"Вы: {msg}\n")
-        self.chat_display.config(state="disabled")
-        context = self.collect_cfg()
-        try:
-            resp = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "Ты помощник по проектированию преобразователей. Если хочешь изменить поля, верни JSON с парами поле:значение."},
-                    {"role": "user", "content": msg + "\n" + json.dumps(context, ensure_ascii=False)}
-                ]
-            )
-            reply = resp.choices[0].message["content"]
-        except Exception as e:
-            reply = f"Ошибка: {e}"
-        self.chat_display.config(state="normal")
-        self.chat_display.insert("end", f"ChatGPT: {reply}\n")
-        self.chat_display.config(state="disabled")
-        self.chat_display.see("end")
-        self.handle_chat_changes(reply)
     def handle_chat_changes(self, text: str):
         m = re.search(r"```json\s*(\{.*?\})\s*```", text, re.S)
         if not m:
@@ -936,8 +952,8 @@ class App(tk.Tk):
                 return d[field]
         return None
     def setup_undo(self):
-        self.undo_stack = []
-        self.redo_stack = []
+        self.undo_stack = deque(maxlen=15)
+        self.redo_stack = deque(maxlen=15)
         for d in [self.inputs_vars, self.core_vars, self.geom_vars, self.mos_vars, self.st_vars]:
             for v in d.values():
                 self._track_var(v)
@@ -1105,7 +1121,7 @@ class App(tk.Tk):
             for w in self.nb.winfo_children():
                 w.destroy()
             self.build_inputs_tab(); self.build_outputs_tab(); self.build_core_tab()
-            self.build_geom_tab(); self.build_clamp_tab(); self.build_mosfet_tab(); self.build_k_tab(); self.build_chat_tab(); self.build_results_tab()
+            self.build_geom_tab(); self.build_clamp_tab(); self.build_mosfet_tab(); self.build_k_tab(); self.build_results_tab()
             self.setup_undo()
         except Exception as e:
             messagebox.showerror("Load JSON error", str(e))
