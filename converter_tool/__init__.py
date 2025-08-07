@@ -1,5 +1,6 @@
 from .calculations import (
     FlybackDesign,
+    TwoSwitchFlybackDesign,
     ForwardDesign,
     TwoSwitchForwardDesign,
     HalfBridgeDesign,
@@ -8,6 +9,7 @@ from .calculations import (
 
 __all__ = [
     "FlybackDesign",
+    "TwoSwitchFlybackDesign",
     "ForwardDesign",
     "TwoSwitchForwardDesign",
     "HalfBridgeDesign",
