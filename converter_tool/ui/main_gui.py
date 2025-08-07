@@ -20,6 +20,7 @@ if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from converter_tool.calculations.flyback_design import FlybackDesign
+from converter_tool.calculations.two_switch_flyback_design import TwoSwitchFlybackDesign
 from converter_tool.calculations.forward_design import ForwardDesign
 from converter_tool.calculations.two_switch_forward_design import TwoSwitchForwardDesign
 from converter_tool.calculations.push_pull_design import PushPullDesign
@@ -28,6 +29,7 @@ from converter_tool.calculations.full_bridge_design import FullBridgeDesign
 
 DESIGN_MAP = {
     "Flyback": FlybackDesign,
+    "2-Switch Flyback": TwoSwitchFlybackDesign,
     "Forward": ForwardDesign,
     "2-Switch Forward": TwoSwitchForwardDesign,
     "Push-Pull": PushPullDesign,
@@ -41,6 +43,7 @@ MOS_LIB_DEFAULT = os.path.join(PACKAGE_DIR, "mosfet_library.json")
 IMAGES_DIR = os.path.join(os.path.dirname(__file__), "Images")
 IMAGE_MAP = {
     "Flyback": "flyback.png",
+    "2-Switch Flyback": "Two_switch_flyback.png",
     "Forward": "Forward.png",
     "2-Switch Forward": "Two_switch_forward.png",
     "Push-Pull": "Push-Pull.png",
