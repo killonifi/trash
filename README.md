@@ -11,18 +11,19 @@ Current structure::
     converter_tool/
         calculations/
             base.py               # common ConverterDesign interface
-            flyback_design.py     # flyback calculations
-            forward_design.py     # placeholder for forward converter
-            half_bridge_design.py # placeholder for half-bridge converter
-            full_bridge_design.py # placeholder for full-bridge converter
+             flyback_design.py         # flyback calculations
+             forward_design.py         # forward converter
+             two_switch_forward_design.py # two-switch forward calculations
+             half_bridge_design.py     # placeholder for half-bridge converter
+             full_bridge_design.py     # placeholder for full-bridge converter
         ui/
             main_gui.py           # Tkinter GUI with topology selector
         data/
             core_library.json
             mosfet_library.json
 
-Only the flyback topology is fully implemented at this time. Other modules are
-stubs prepared for future expansion.
+Flyback, forward and two-switch forward topologies are implemented. Other
+modules are stubs prepared for future expansion.
 
 Run the GUI:
 
