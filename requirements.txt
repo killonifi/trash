@@ -1,1 +1,2 @@
 openai>=1.0.0
+pyvirtualdisplay>=3.0
