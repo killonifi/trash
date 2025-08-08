@@ -16,6 +16,11 @@ from pathlib import Path
 from collections import deque
 from openai import OpenAI
 
+from converter_tool.calculations.optocoupler_design import (
+    InputParams,
+    compute_optocoupler,
+)
+
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -454,6 +459,8 @@ class App(tk.Tk):
         style.configure("TButton", padding=6, relief="flat")
         style.configure("Accent.TButton", padding=6, foreground="white", background="#0078D7", relief="flat")
         style.map("Accent.TButton", background=[("active", "#005A9E")])
+        style.configure("Chat.TButton", padding=6, foreground="white", background="#1E90FF", relief="flat")
+        style.map("Chat.TButton", background=[("active", "#1C86EE")])
         style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
         style.configure("Info.TLabel", foreground="#0078D7")
         self.option_add("*Font", "{Segoe UI} 10")
@@ -467,7 +474,7 @@ class App(tk.Tk):
         topo_cb.bind("<<ComboboxSelected>>", self.change_topology)
         center = ttk.Frame(topbar)
         center.pack(side="left", expand=True, fill="x")
-        ttk.Button(center, text="ChatGPT", command=self.open_chat).pack()
+        ttk.Button(center, text="ChatGPT", command=self.open_chat, style="Chat.TButton").pack()
         ttk.Button(topbar, text="Compute", command=self.compute, style="Accent.TButton").pack(side="right", padx=4)
         self.design_cls = DESIGN_MAP[self.topology_var.get()]
         self.design = self.design_cls()
@@ -492,6 +499,7 @@ class App(tk.Tk):
         self.build_mosfet_tab()
         self.build_k_tab()
         self.build_results_tab()
+        self.build_optocoupler_tab()
         self.create_menu()
         self.setup_undo()
     def create_menu(self):
@@ -807,6 +815,22 @@ class App(tk.Tk):
         xsb.grid(row=1, column=0, sticky="ew")
         text_frame.columnconfigure(0, weight=1)
         text_frame.rowconfigure(0, weight=1)
+    def build_optocoupler_tab(self):
+        tab = ttk.Frame(self.nb); self.nb.add(tab, text="Optocoupler")
+        top = ttk.Frame(tab, padding=6); top.pack(fill="x")
+        ttk.Button(top, text="Compute", command=self.compute_optocoupler, style="Accent.TButton").pack(side="left", padx=4)
+        text_frame = ttk.Frame(tab)
+        text_frame.pack(fill="both", expand=True)
+        self.opto_text = tk.Text(text_frame, wrap="none", font=("Consolas", 10))
+        ysb = ttk.Scrollbar(text_frame, orient="vertical", command=self.opto_text.yview)
+        xsb = ttk.Scrollbar(text_frame, orient="horizontal", command=self.opto_text.xview)
+        self.opto_text.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
+        self.opto_text.grid(row=0, column=0, sticky="nsew")
+        add_copy_menu(self.opto_text)
+        ysb.grid(row=0, column=1, sticky="ns")
+        xsb.grid(row=1, column=0, sticky="ew")
+        text_frame.columnconfigure(0, weight=1)
+        text_frame.rowconfigure(0, weight=1)
     def add_output(self):
         d = OutputDialog(self); self.wait_window(d)
         if d.result:
@@ -882,10 +906,26 @@ class App(tk.Tk):
             cfg_norm = self.design.normalize_cfg(cfg)
             res = self.design.run_calculation(cfg_norm)
             self.show_results(res)
+            self.compute_optocoupler(cfg_norm)
         except NotImplementedError:
             messagebox.showinfo("Not implemented", "Selected topology is not yet implemented")
         except Exception as e:
             messagebox.showerror("Compute error", str(e))
+    def compute_optocoupler(self, cfg_norm=None):
+        try:
+            if cfg_norm is None:
+                cfg = self.collect_cfg()
+                cfg_norm = self.design.normalize_cfg(cfg)
+            vout = cfg_norm["outputs"][0]["v"]
+            fsw = cfg_norm["input"]["fsw"]
+            params = InputParams(v_out=vout, f_sw=fsw)
+            report = compute_optocoupler(params)
+            lines = [f"{k}: {v}" for k, v in report.items()]
+            self.opto_text.delete("1.0", "end")
+            self.opto_text.insert("1.0", "\n".join(lines))
+        except Exception as e:
+            self.opto_text.delete("1.0", "end")
+            self.opto_text.insert("1.0", f"Error: {e}")
     def run_sweep(self):
         if not hasattr(self.design, "sweep_k"):
             messagebox.showinfo("K-optimizer", "Sweep not supported for this topology")
@@ -1123,8 +1163,15 @@ class App(tk.Tk):
             self.model = cfg
             for w in self.nb.winfo_children():
                 w.destroy()
-            self.build_inputs_tab(); self.build_outputs_tab(); self.build_core_tab()
-            self.build_geom_tab(); self.build_clamp_tab(); self.build_mosfet_tab(); self.build_k_tab(); self.build_results_tab()
+            self.build_inputs_tab()
+            self.build_outputs_tab()
+            self.build_core_tab()
+            self.build_geom_tab()
+            self.build_clamp_tab()
+            self.build_mosfet_tab()
+            self.build_k_tab()
+            self.build_results_tab()
+            self.build_optocoupler_tab()
             self.setup_undo()
         except Exception as e:
             messagebox.showerror("Load JSON error", str(e))
