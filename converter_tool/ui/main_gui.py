@@ -8,12 +8,20 @@ GUI for converter design tool with multiple topologies.
 - K-Optimizer: choose criterion (min Vds / min Ipk / min max-VRRM, min total loss), scan D(Vin_min) range, apply best
 """
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 import json, os, sys, re
 from typing import Dict, Any
 from pathlib import Path
 
 from collections import deque
+
+# Start virtual display in headless environments to avoid Tk errors
+if not os.environ.get("DISPLAY"):
+    try:
+        from pyvirtualdisplay import Display
+        Display().start()
+    except Exception:
+        pass
 try:
     from openai import OpenAI
 except Exception:
@@ -753,6 +761,39 @@ class App(tk.Tk):
         ttk.Button(btns, text="Add", command=self.add_output).pack(fill="x", padx=5, pady=5)
         ttk.Button(btns, text="Edit", command=self.edit_output).pack(fill="x", padx=5, pady=5)
         ttk.Button(btns, text="Remove", command=self.remove_output).pack(fill="x", padx=5, pady=5)
+    def add_output(self):
+        data = {}
+        for field in OUTPUT_COLS:
+            val = simpledialog.askstring("Add output", f"{field}:")
+            if val is None:
+                return
+            data[field] = val
+        self.model["outputs"].append(data)
+        self.tree.insert("", "end", values=[data.get(c, "") for c in OUTPUT_COLS])
+    def edit_output(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("Edit output", "Please select an output to edit.")
+            return
+        item = sel[0]
+        idx = self.tree.index(item)
+        data = self.model["outputs"][idx]
+        for field in OUTPUT_COLS:
+            val = simpledialog.askstring("Edit output", f"{field}:", initialvalue=data.get(field, ""))
+            if val is None:
+                return
+            data[field] = val
+        self.model["outputs"][idx] = data
+        self.tree.item(item, values=[data.get(c, "") for c in OUTPUT_COLS])
+    def remove_output(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("Remove output", "Please select an output to remove.")
+            return
+        for item in sel:
+            idx = self.tree.index(item)
+            del self.model["outputs"][idx]
+            self.tree.delete(item)
     def build_core_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Core")
         core = self.model["core"]
@@ -817,6 +858,9 @@ class App(tk.Tk):
         for r,(lbl,k) in enumerate(labels, start=start):
             ttk.Label(grid, text=lbl).grid(row=r, column=0, sticky="w", pady=3)
             ttk.Entry(grid, textvariable=self.mos_vars[k], width=20).grid(row=r, column=1, sticky="w", pady=3)
+    def build_optocoupler_tab(self):
+        tab = ttk.Frame(self.nb); self.nb.add(tab, text="Optocoupler")
+        ttk.Label(tab, text="Optocoupler design UI not implemented").pack(padx=10, pady=10)
     def open_core_library(self):
         CoreLibraryWindow(self, self.apply_core_from_library)
     def open_mosfet_library(self):
