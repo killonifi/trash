@@ -16,14 +16,13 @@ from pathlib import Path
 from collections import deque
 from openai import OpenAI
 
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+
 from converter_tool.calculations.optocoupler_design import (
     InputParams,
     compute_optocoupler,
 )
-
-if __package__ in (None, ""):
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-
 from converter_tool.calculations.flyback_design import FlybackDesign
 from converter_tool.calculations.two_switch_flyback_design import TwoSwitchFlybackDesign
 from converter_tool.calculations.forward_design import ForwardDesign
