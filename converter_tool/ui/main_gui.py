@@ -1052,13 +1052,19 @@ class App(tk.Tk):
         self.opto_vars["c3_nf"].set("1.0")
         self.opto_vars["fp2"].set("2000")
 
+        self.opto_field_frames = {}
+        network_fields = {"fz1", "fz2", "fp3", "fp2", "c2_nf", "c3_nf"}
+
         def add_row(parent, r, label, key, hint=None):
             frm = ttk.Frame(parent); frm.grid(row=r, column=0, columnspan=2, sticky="w", pady=1)
             ttk.Label(frm, text=label).pack(side="left")
             e = ttk.Entry(frm, textvariable=self.opto_vars[key], width=12); e.pack(side="left", padx=(6,0))
             if hint:
-                q = ttk.Label(frm, text=" ?", foreground="#888"); q.pack(side="left", padx=4)
+                q = ttk.Label(frm, text="?", style="Info.TLabel")
+                q.pack(side="left", padx=4)
                 self.add_tooltip(q, hint)
+            if key in network_fields:
+                self.opto_field_frames[key] = frm
             return e
         r=0
 
@@ -1068,7 +1074,7 @@ class App(tk.Tk):
                                values=["type1","type2","type3"],
                                textvariable=self.opto_vars["comp_type"], width=16)
         type_cb.grid(row=r, column=1, sticky="ew", pady=2)
-        # removed: no-op bind to undefined handler
+        type_cb.bind("<<ComboboxSelected>>", self.on_comp_type_changed)
         r += 1
         r += 1
         add_row(left, r, "Vout, V", "v_out", "Основной выход, В"); r+=1
@@ -1108,6 +1114,8 @@ class App(tk.Tk):
         # Right: image + tabs
         right = ttk.Frame(body); right.pack(side="left", fill="both", expand=True)
         imgf = ttk.Frame(right, padding=(6,6,6,0)); imgf.pack(fill="x")
+        self.opto_img_label = ttk.Label(imgf)
+        self.opto_img_label.pack(anchor="w")
         try:
             candidates = ["Optocoupler.png","optocoupler.png","Optocoupler.PNG","optocoupler.PNG"]
             img_path = None
@@ -1117,11 +1125,11 @@ class App(tk.Tk):
                     img_path = pth; break
             if img_path:
                 self.opto_img = tk.PhotoImage(file=img_path)
-                ttk.Label(imgf, image=self.opto_img).pack(anchor="w")
+                self.opto_img_label.configure(image=self.opto_img)
             else:
-                ttk.Label(imgf, text="(optocoupler image not available)").pack(anchor="w")
+                self.opto_img_label.configure(text="(optocoupler image not available)")
         except Exception:
-            ttk.Label(imgf, text="(optocoupler image not available)").pack(anchor="w")
+            self.opto_img_label.configure(text="(optocoupler image not available)")
 
         inner = ttk.Notebook(right); inner.pack(fill="both", expand=True, padx=6, pady=6)
         res_tab = ttk.Frame(inner); inner.add(res_tab, text="Results")
@@ -1152,6 +1160,7 @@ class App(tk.Tk):
             self.load_opto_defaults()
         except Exception:
             pass
+        self.on_comp_type_changed()
 
     def load_opto_defaults(self):
         # Take defaults from the normalized configuration (Inputs/Outputs)
@@ -1308,16 +1317,73 @@ class App(tk.Tk):
             if cfg_norm is None:
                 cfg = self.collect_cfg()
                 cfg_norm = self.design.normalize_cfg(cfg)
-            vout = cfg_norm["outputs"][0]["v"]
-            fsw = cfg_norm["input"]["fsw"]
-            params = InputParams(v_out=vout, f_sw=fsw)
+            g = {k: self.opto_vars[k].get().strip() for k in self.opto_vars}
+            def fget(k, default):
+                try:
+                    return float(g.get(k) or default)
+                except Exception:
+                    return float(default)
+            params = InputParams(
+                v_out = fget("v_out", cfg_norm["outputs"][0]["v"]),
+                f_sw  = fget("f_sw", cfg_norm["input"]["fsw"]),
+                vdd   = fget("vdd", 5.0),
+                r_pullup = fget("r_pullup", 20_000.0),
+                ctr_min  = fget("ctr_min", 0.3),
+                copto_nf = fget("copto_nf", 2.0),
+                v_ref    = fget("v_ref", 2.5),
+                v_f_led  = fget("v_f_led", 1.0),
+                vce_sat  = fget("vce_sat", 0.3),
+                i_div_uA = fget("i_div_uA", 250.0),
+                v_bias_zener = fget("v_bias_zener", 6.2),
+                i_bias_mA    = fget("i_bias_mA", 1.0),
+                fc      = fget("fc", 1000.0),
+                gc_db   = fget("gc_db", -10.0),
+                fz1     = fget("fz1", 300.0),
+                fz2     = fget("fz2", 900.0),
+                fp3     = fget("fp3", 3000.0),
+                c1_nf   = fget("c1_nf", 10.0),
+                c2_nf   = fget("c2_nf", 4.7),
+                c3_nf   = fget("c3_nf", 1.0),
+                fp2     = fget("fp2", 2000.0),
+                vk_work = fget("vk_work", 2.5),
+                vfb_min = fget("vfb_min", 2.0),
+                vfb_max = fget("vfb_max", 4.0),
+                opto_model = g.get("opto_model", ""),
+                comp_type = g.get("comp_type", "type3"),
+            )
             report = compute_optocoupler(params)
-            lines = [f"{k}: {v}" for k, v in report.items()]
             self.opto_text.delete("1.0", "end")
-            self.opto_text.insert("1.0", text if 'text' in locals() and text else "\n".join(lines))
+            self.opto_text.insert("1.0", report.get("report_text", ""))
         except Exception as e:
             self.opto_text.delete("1.0", "end")
             self.opto_text.insert("1.0", f"Error: {e}")
+    def on_comp_type_changed(self, event=None):
+        t = self.opto_vars["comp_type"].get().strip().lower()
+        visible = {"c1_nf"}
+        if t == "type2":
+            visible.update({"fz1", "fp2", "c3_nf"})
+        elif t == "type3":
+            visible.update({"fz1", "fz2", "fp3", "c2_nf", "c3_nf"})
+        for key, frm in self.opto_field_frames.items():
+            if key in visible:
+                frm.grid()
+            else:
+                frm.grid_remove()
+        img_name = {
+            "type1": "Optocoupler_type1.png",
+            "type2": "Optocoupler_type2.png",
+            "type3": "Optocoupler_type3.png",
+        }.get(t, "Optocoupler.png")
+        pth = os.path.join(IMAGES_DIR, img_name)
+        if os.path.exists(pth):
+            self.opto_img = tk.PhotoImage(file=pth)
+            self.opto_img_label.configure(image=self.opto_img, text="")
+        else:
+            self.opto_img_label.configure(image="", text="(optocoupler image not available)")
+        try:
+            self.compute_optocoupler()
+        except Exception:
+            pass
     def run_sweep(self):
         if not hasattr(self.design, "sweep_k"):
             messagebox.showinfo("K-optimizer", "Sweep not supported for this topology")
@@ -1577,17 +1643,3 @@ class App(tk.Tk):
         messagebox.showinfo("Saved", path)
 if __name__ == "__main__":
     app = App(); app.mainloop()
-
-    def on_comp_type_changed(self, event=None):
-        t = self.opto_vars["comp_type"].get().strip().lower()
-        name = {"type1":"Optocoupler_type1.png","type2":"Optocoupler_type2.png","type3":"Optocoupler_type3.png"}.get(t, "Optocoupler.png")
-        try:
-            pth = os.path.join(IMAGES_DIR, name)
-            if os.path.exists(pth):
-                self.opto_img = tk.PhotoImage(file=pth)
-                # Find image label in the right panel's imgf frame: simplest is to rebuild the tab once user changes
-                # For robustness, just re-run compute to refresh report and user will see the image on next open.
-            else:
-                pass
-        except Exception:
-            pass
