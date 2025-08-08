@@ -1,0 +1,34 @@
+[
+  {
+    "model": "PC817C",
+    "vendor": "Sharp/Qt",
+    "ctr_min": 0.5,
+    "copto_nf": 0.06,
+    "vce_sat": 0.2,
+    "notes": "Generic slow optocoupler, CTR bin C."
+  },
+  {
+    "model": "LTV-817C",
+    "vendor": "LiteOn",
+    "ctr_min": 0.5,
+    "copto_nf": 0.08,
+    "vce_sat": 0.2,
+    "notes": "Popular low-cost optocoupler."
+  },
+  {
+    "model": "TLP181",
+    "vendor": "Toshiba",
+    "ctr_min": 0.5,
+    "copto_nf": 0.03,
+    "vce_sat": 0.2,
+    "notes": "Faster, lower capacitance."
+  },
+  {
+    "model": "TLP290-4",
+    "vendor": "Toshiba",
+    "ctr_min": 0.5,
+    "copto_nf": 0.02,
+    "vce_sat": 0.2,
+    "notes": "Low cap opto; multi-channel."
+  }
+]
