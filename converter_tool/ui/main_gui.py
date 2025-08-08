@@ -531,16 +531,8 @@ class App(tk.Tk):
         self.design_cls = DESIGN_MAP[name]
         self.design = self.design_cls()
         self.title(f"Converter Design Tool - {name}")
+        self.update_soft2t_visibility()
         self.update_topology_image()
-        try:
-            # Show or hide the improved 2T checkbox depending on topology
-            if name == "2-Switch Flyback":
-                self.soft2t_cb.state(["!disabled"])
-            else:
-                self.soft2t_var.set(False)
-                self.soft2t_cb.state(["disabled"])
-        except Exception:
-            pass
 
     def show_equations(self):
         win = tk.Toplevel(self)
@@ -591,7 +583,7 @@ class App(tk.Tk):
         widget.bind("<Leave>", leave)
     def build_inputs_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Inputs")
-        input_keys = [k for k in self.model["input"].keys() if k not in ("force_dcm",)]
+        input_keys = [k for k in self.model["input"].keys() if k not in ("force_dcm","soft_switch")]
         self.inputs_vars = {k: tk.StringVar(value=str(self.model["input"].get(k,""))) for k in input_keys}
         self.force_dcm_var = tk.BooleanVar(value=bool(self.model["input"].get("force_dcm", False)))
         self.soft2t_var = tk.BooleanVar(value=bool(self.model["input"].get("soft_switch", False)))
@@ -644,24 +636,11 @@ class App(tk.Tk):
             row += 1
         ttk.Checkbutton(grid, text="Force DCM", variable=self.force_dcm_var).grid(row=row, column=0, sticky="w", pady=3)
         row += 1
-        if self.topology_var.get() == "2-Switch Flyback":
-            self.soft2t_cb = ttk.Checkbutton(grid, text="Improved 2T (regenerative soft-switch)", variable=self.soft2t_var, command=self.update_topology_image)
-            self.soft2t_cb.grid(row=row, column=0, columnspan=2, sticky="w", pady=3)
-        else:
-            self.soft2t_cb = ttk.Checkbutton(grid, text="Improved 2T (regenerative soft-switch)", variable=self.soft2t_var, command=self.update_topology_image)
-            self.soft2t_cb.state(["disabled"]) 
-            self.soft2t_cb.grid(row=row, column=0, columnspan=2, sticky="w", pady=3)
+        self.soft2t_row = row
+        self.soft2t_cb = ttk.Checkbutton(grid, text="Improved 2T (regenerative soft-switch)", variable=self.soft2t_var, command=self.update_topology_image)
         self.update_f_line_visibility()
+        self.update_soft2t_visibility()
         self.update_topology_image()
-        try:
-            # Show or hide the improved 2T checkbox depending on topology
-            if name == "2-Switch Flyback":
-                self.soft2t_cb.state(["!disabled"])
-            else:
-                self.soft2t_var.set(False)
-                self.soft2t_cb.state(["disabled"])
-        except Exception:
-            pass
 
 
     def update_f_line_visibility(self, *args):
@@ -671,6 +650,16 @@ class App(tk.Tk):
         else:
             self.f_line_label.grid()
             self.f_line_entry.grid()
+
+    def update_soft2t_visibility(self):
+        if not hasattr(self, "soft2t_cb"):
+            return
+        if self.topology_var.get() == "2-Switch Flyback":
+            self.soft2t_cb.grid(row=self.soft2t_row, column=0, columnspan=2, sticky="w", pady=3)
+            self.soft2t_cb.state(["!disabled"])
+        else:
+            self.soft2t_var.set(False)
+            self.soft2t_cb.grid_remove()
 
     def update_topology_image(self):
         name = self.topology_var.get()
@@ -916,7 +905,8 @@ class App(tk.Tk):
     def collect_cfg(self) -> Dict[str, Any]:
         inp = {k: v.get() for k,v in self.inputs_vars.items()}
         inp["force_dcm"] = bool(self.force_dcm_var.get())
-        inp["soft_switch"] = bool(self.soft2t_var.get())
+        if self.topology_var.get() == "2-Switch Flyback":
+            inp["soft_switch"] = bool(self.soft2t_var.get())
         outs=[]
         for iid in self.tree.get_children():
             vals = self.tree.item(iid,"values")
