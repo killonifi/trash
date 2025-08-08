@@ -14,7 +14,10 @@ from typing import Dict, Any
 from pathlib import Path
 
 from collections import deque
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
 
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -76,6 +79,55 @@ EQUATIONS_TEXT = (
     "      P_Coss ≈ 0.5·C_OSS·VDS²·f_sw,    P_gate = Qg·Vg·f_sw\n"
     "(14) Диод  P_cond ≈ Iout·Vf;  P_rr ≈ Qrr·Vrev·f_sw\n"
 )
+
+OPTO_INFO_TEXT = """ЗАЧЕМ ЭТО ВСЁ
+— Оптопара медленная: у неё есть полюс f_opто. Мы формуем петлю так, чтобы не «упереться» фазой в этот потолок, и одновременно получить быстрый и чистый переходный.
+— TL431 — это программируемый «ошибкоусилитель»: задаёт уставку (REF≈2.5 В), обеспечивает усиление ошибки и позволяет расставить нули/полюса компенсатора (Type‑3).
+
+БАЗОВЫЕ ЧАСТОТЫ
+— f_opто = 1/(2π·Rpullup·(Copto + C2)) — полюс оптопары (предел скорости). Чем больше Rpullup и (Copto+C2), тем ниже f_opто.
+— fc — частота пересечения петли. Это «скорость» системы. Держите fc заметно ниже f_opто и не выше fsw/10.
+— fz1, fz2 — нули Type‑3. Поднимают фазу около fc: обычно fz1 ≈ 0.2…0.4·fc, fz2 ≈ 0.7…1.0·fc.
+— fp3 — верхний полюс Type‑3: ≈ 2…4·fc, чтобы гасить усиление выше пересечения.
+— f_pI = 1/(2π·R3·C3) — «интеграторный» полюс. В расчёте R3 подбирается по требуемому модулю в fc (Gc(fc)).
+
+КАК ВЫБИРАТЬ ЧАСТОТЫ
+1) Посчитайте f_opто с наброском C2 (например 4.7 нФ) и вашим Rpullup, Copto.
+2) Выберите fc = min(0.25·f_opто, fsw/10). Если слишком медленно — боритесь за более высокий f_opто (уменьшите Rpullup, C2; возьмите оптопару с меньшим Copto).
+3) Поставьте нули: fz1≈0.3·fc, fz2≈0.9·fc. Полюс fp3≈3·fc.
+4) Поменяйте частоты при необходимости: добейте фазовый запас 45…60° и равномерный отклик.
+
+КАК ВЫБИРАТЬ КОНДЕНСАТОРЫ
+— Сначала задайте C1,C2,C3 так, чтобы R вышли в удобный диапазон 2 к…200 кΩ.
+— Типичные стартовые: C1=10 нФ, C2=4.7 нФ, C3=1.0 нФ (E24). Помните: C2 стоит параллельно Copto → понижает f_opто, не раздувайте её без нужды.
+— Если R << 1 кΩ — увеличьте соответствующую C. Если R >> 1 МОм — тоже увеличьте C или скорректируйте частоту.
+
+FB-ОКНО КОНТРОЛЛЕРА
+— Контроллер меняет D лишь в окне FB: fb_min…fb_max. Коллектор оптопары должен перекрывать это окно.
+— Оценка: Vfb_high ≈ Vdd − CTR·I_LED,nom·Rpullup; Vfb_low ≈ Vdd − CTR·I_LED,max·Rpullup (но ≥ VCE(sat)).
+— Если окно не перекрывается — увеличьте CTR, уменьшите RLED и/или Rpullup (следите за f_opто), либо поднимите Vbias.
+
+РАБОЧАЯ ТОЧКА Vk И ТОК LED
+— Возьмите Vk≈2.5…3.0 В — это даёт TL431 запас по VKA и линейность.
+— Номинальный ток LED: I_LED,nom ≈ (Vbias − Vf − Vk)/RLED. От него зависят усиление через CTR и перекрытие FB‑окна.
+— Слишком малый RLED — лишние потери; слишком большой — не хватит усиления. В расчёте показывается RLED,max и выбранный RLED.
+
+СТАБИЛИТРОН И Rz
+— Зачем: убрать «fast‑lane», сделать Vbias «жёстким» и дать TL431 ток смещения (через Rbias).
+— Шунтируйте Vbias: 100 нФ + 1…4.7 µF (X7R).
+— Rz считайте по минимуму источника V_S:  Rz = (V_S,min − Vz) / (I_Z,min + I_LED,max + I_bias).
+  Проверьте мощности на максимум V_S,max.
+
+ОПТОПАРЫ (БИБЛИОТЕКА)
+— Ключевые параметры: CTR(min) в вашей рабочей точке и Copto (влияет на f_opто).
+— Быстрые оптопары имеют меньшую Copto и/или лучшую частотную характеристику → выше f_opто и лучший фазовый запас.
+— Используйте кнопку «Open Optocoupler Library» и подставляйте параметры модели в форму.
+
+БЫСТРЫЙ ЧЕК‑ЛИСТ (работает почти всегда)
+1) Задал Rpullup (20…47 кΩ старт) и выбрал оптопару.
+2) Оценил f_opто → взял fc≈0.25·f_opто (и ≤ fsw/10).
+3) Поставил fz1≈0.3·fc, fz2≈0.9·fc, fp3≈3·fc. C1=10 нФ, C2=4.7 нФ, C3=1 нФ → получил R1,R2; R3 подбирает расчёт по Gc(fc).
+4) Проверил перекрытие FB‑окна и предупреждения. Если не сходится — CTR↑, RLED↓, Rpullup↓ (проверяя f_opто), Vbias↑."""
 
 def add_copy_menu(widget: tk.Widget):
     menu = tk.Menu(widget, tearoff=0)
@@ -302,6 +354,43 @@ class CoreLibraryWindow(tk.Toplevel):
         self.all_items.remove(item)
         self.apply_filter()
 
+
+class OptoLibraryWindow(tk.Toplevel):
+    def __init__(self, master, lib_path):
+        super().__init__(master)
+        self.title("Optocoupler Library")
+        self.geometry("640x320")
+        self.master = master
+        self.lib_path = lib_path
+        cols = ("model","vendor","ctr_min","copto_nf","vce_sat","notes")
+        self.tree = ttk.Treeview(self, columns=cols, show="headings")
+        for c,w in zip(cols,(120,120,80,80,80,200)):
+            self.tree.heading(c, text=c); self.tree.column(c, width=w, anchor="w")
+        self.tree.pack(fill="both", expand=True)
+        btns = ttk.Frame(self); btns.pack(fill="x")
+        ttk.Button(btns, text="Apply", command=self.apply).pack(side="left", padx=6, pady=6)
+        ttk.Button(btns, text="Close", command=self.destroy).pack(side="right", padx=6, pady=6)
+        try:
+            data = json.load(open(self.lib_path, "r", encoding="utf-8"))
+        except Exception:
+            data = []
+        for it in data:
+            self.tree.insert("", "end", values=(it.get("model",""), it.get("vendor",""), it.get("ctr_min",""),
+                                                it.get("copto_nf",""), it.get("vce_sat",""), it.get("notes","")))
+    def apply(self):
+        sel = self.tree.selection()
+        if not sel: return
+        model, vendor, ctr_min, copto_nf, vce_sat, notes = self.tree.item(sel[0], "values")
+        try:
+            self.master.opto_vars["ctr_min"].set(str(ctr_min))
+            self.master.opto_vars["copto_nf"].set(str(copto_nf))
+            self.master.opto_vars["vce_sat"].set(str(vce_sat))
+            # Store model name in hidden var if present
+            if "opto_model" in self.master.opto_vars:
+                self.master.opto_vars["opto_model"].set(str(model))
+        except Exception:
+            pass
+        self.destroy()
 class MosfetLibraryWindow(tk.Toplevel):
     def __init__(self, master, apply_cb):
         super().__init__(master)
@@ -517,6 +606,7 @@ class App(tk.Tk):
         info = tk.Menu(m, tearoff=0)
         info.add_command(label="Equations", command=self.show_equations)
         info.add_command(label="AWG", command=self.show_awg_table)
+        info.add_command(label="Optocoupler", command=self.show_opto_info)
         m.add_cascade(label="Info", menu=info)
         self.config(menu=m)
 
@@ -567,6 +657,19 @@ class App(tk.Tk):
             return
         for g, a in table:
             tree.insert("", "end", values=(f"AWG{self.design.awg_str(g)}", f"{a:.4f}"))
+
+    def show_opto_info(self):
+        win = tk.Toplevel(self)
+        win.title("Optocoupler Info")
+        txt = tk.Text(win, wrap="word", width=80, height=24)
+        ysb = ttk.Scrollbar(win, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=ysb.set)
+        txt.insert("1.0", OPTO_INFO_TEXT)
+        txt.configure(state="disabled")
+        txt.grid(row=0, column=0, sticky="nsew")
+        ysb.grid(row=0, column=1, sticky="ns")
+        win.columnconfigure(0, weight=1)
+        win.rowconfigure(0, weight=1)
 
     def add_tooltip(self, widget, text: str):
         tip = Tooltip(widget, text=text)
@@ -838,22 +941,295 @@ class App(tk.Tk):
         xsb.grid(row=1, column=0, sticky="ew")
         text_frame.columnconfigure(0, weight=1)
         text_frame.rowconfigure(0, weight=1)
+        # Preload defaults from current model
+        try:
+            self.load_opto_defaults()
+        except Exception:
+            pass
+
+    def load_opto_defaults(self):
+        # Take defaults from the normalized configuration (Inputs/Outputs)
+        cfg = self.collect_cfg()
+        cfg_norm = self.design.normalize_cfg(cfg)
+        vout = cfg_norm["outputs"][0]["v"]
+        fsw = cfg_norm["input"]["fsw"]
+        self.opto_vars["v_out"].set(str(vout))
+        self.opto_vars["f_sw"].set(str(fsw))
+
+    def compute_optocoupler(self, cfg_norm=None):
+        try:
+            if cfg_norm is None:
+                cfg = self.collect_cfg()
+                cfg_norm = self.design.normalize_cfg(cfg)
+            # Gather GUI values (with fallbacks)
+            g = {k: self.opto_vars[k].get().strip() for k in self.opto_vars}
+            # Where numbers expected, convert
+            def fget(k, default):
+                try:
+                    return float(g.get(k) or default)
+                except Exception:
+                    return float(default)
+            params = InputParams(
+                v_out = fget("v_out", cfg_norm["outputs"][0]["v"]),
+                f_sw  = fget("f_sw", cfg_norm["input"]["fsw"]),
+                vdd   = fget("vdd", 5.0),
+                r_pullup = fget("r_pullup", 20_000.0),
+                ctr_min  = fget("ctr_min", 0.3),
+                copto_nf = fget("copto_nf", 2.0),
+                v_ref    = fget("v_ref", 2.5),
+                v_f_led  = fget("v_f_led", 1.0),
+                vce_sat  = fget("vce_sat", 0.3),
+                i_div_uA = fget("i_div_uA", 250.0),
+                v_bias_zener = fget("v_bias_zener", 6.2),
+                i_bias_mA    = fget("i_bias_mA", 1.0),
+                fc      = fget("fc", 1000.0),
+                gc_db   = fget("gc_db", -10.0),
+                fz1     = fget("fz1", 300.0),
+                fz2     = fget("fz2", 900.0),
+                fp3     = fget("fp3", 3000.0),
+                c1_nf   = fget("c1_nf", 10.0),
+                c2_nf   = fget("c2_nf", 4.7),
+                c3_nf   = fget("c3_nf", "fp2", 1.0),
+                vk_work = fget("vk_work", 2.5),
+                vfb_min = fget("vfb_min", 2.0),
+                vfb_max = fget("vfb_max", 4.0),
+            )
+            params.comp_type = self.opto_vars['comp_type'].get().strip().lower(); params.comp_type = self.opto_vars['comp_type'].get().strip().lower(); report = compute_optocoupler(params)
+            text = report.get("report_text")
+            if not text:
+                lines = []
+                lines.append("=== TL431 + Optocoupler (Type‑3, no fast lane) ===")
+            for sec in ("inputs","derived","type3_network","achieved_at_fc","bias"):
+                lines.append(f"\n[{sec}]")
+                for k, v in report[sec].items():
+                    if isinstance(v, float):
+                        lines.append(f"{k:20s} = {v:.6g}")
+                    else:
+                        lines.append(f"{k:20s} = {v}")
+            if report.get("warnings"):
+                lines.append("\n[WARNINGS]")
+                for w in report["warnings"]:
+                    lines.append("! " + w)
+            self.opto_text.delete("1.0", "end")
+            self.opto_text.insert("1.0", text if 'text' in locals() and text else "\n".join(lines))
+        except Exception as e:
+            self.opto_text.delete("1.0", "end")
+            self.opto_text.insert("1.0", f"Error: {e}")
+    
     def build_optocoupler_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Optocoupler")
-        top = ttk.Frame(tab, padding=6); top.pack(fill="x")
-        ttk.Button(top, text="Compute", command=self.compute_optocoupler, style="Accent.TButton").pack(side="left", padx=4)
-        text_frame = ttk.Frame(tab)
-        text_frame.pack(fill="both", expand=True)
-        self.opto_text = tk.Text(text_frame, wrap="none", font=("Consolas", 10))
-        ysb = ttk.Scrollbar(text_frame, orient="vertical", command=self.opto_text.yview)
-        xsb = ttk.Scrollbar(text_frame, orient="horizontal", command=self.opto_text.xview)
+        body = ttk.Frame(tab); body.pack(fill="both", expand=True)
+        # Left pane with inputs
+        left = ttk.Frame(body, padding=6); left.pack(side="left", fill="y")
+        self.opto_vars = {k: tk.StringVar() for k in [
+            "v_out","f_sw","vdd","r_pullup","ctr_min","copto_nf","v_ref","v_f_led","vce_sat",
+            "i_div_uA","v_bias_zener","i_bias_mA","fc","gc_db","fz1","fz2","fp3","c1_nf","c2_nf","c3_nf", "fp2", "vk_work", "vfb_min", "vfb_max", "opto_model", "comp_type"
+        ]}
+        # defaults
+        self.opto_vars["v_out"].set("12.0")
+        self.opto_vars["f_sw"].set("100000")
+        self.opto_vars["vdd"].set("5.0")
+        self.opto_vars["r_pullup"].set("20000")
+        self.opto_vars["ctr_min"].set("0.3")
+        self.opto_vars["copto_nf"].set("2.0")
+        self.opto_vars["v_ref"].set("2.5")
+        self.opto_vars["v_f_led"].set("1.0")
+        self.opto_vars["vce_sat"].set("0.3")
+        self.opto_vars["vk_work"].set("2.5")
+        self.opto_vars["vfb_min"].set("2.0")
+        self.opto_vars["vfb_max"].set("4.0")
+        self.opto_vars["i_div_uA"].set("250")
+        self.opto_vars["v_bias_zener"].set("6.2")
+        self.opto_vars["i_bias_mA"].set("1.0")
+        self.opto_vars["fc"].set("1000")
+        self.opto_vars["gc_db"].set("-10")
+        self.opto_vars["comp_type"].set("type3")
+        self.opto_vars["fz1"].set("300")
+        self.opto_vars["fz2"].set("900")
+        self.opto_vars["fp3"].set("3000")
+        self.opto_vars["c1_nf"].set("10.0")
+        self.opto_vars["c2_nf"].set("4.7")
+        self.opto_vars["c3_nf"].set("1.0")
+        self.opto_vars["fp2"].set("2000")
+
+        self.opto_field_frames = {}
+        network_fields = {"fz1", "fz2", "fp3", "fp2", "c2_nf", "c3_nf"}
+
+        def add_row(parent, r, label, key, hint=None):
+            frm = ttk.Frame(parent); frm.grid(row=r, column=0, columnspan=2, sticky="w", pady=1)
+            ttk.Label(frm, text=label).pack(side="left")
+            e = ttk.Entry(frm, textvariable=self.opto_vars[key], width=12); e.pack(side="left", padx=(6,0))
+            if hint:
+                q = ttk.Label(frm, text="?", style="Info.TLabel")
+                q.pack(side="left", padx=4)
+                self.add_tooltip(q, hint)
+            if key in network_fields:
+                self.opto_field_frames[key] = frm
+            return e
+        r=0
+
+        # --- Compensation type selector ---
+        ttk.Label(left, text="Compensator type").grid(row=r, column=0, sticky="w")
+        type_cb = ttk.Combobox(left, state="readonly",
+                               values=["type1","type2","type3"],
+                               textvariable=self.opto_vars["comp_type"], width=16)
+        type_cb.grid(row=r, column=1, sticky="ew", pady=2)
+        type_cb.bind("<<ComboboxSelected>>", self.on_comp_type_changed)
+        r += 1
+        r += 1
+        add_row(left, r, "Vout, V", "v_out", "Основной выход, В"); r+=1
+        ttk.Separator(left, orient="horizontal").grid(row=r, column=0, columnspan=2, sticky="ew", pady=4); r+=1
+        add_row(left, r, "Vdd, V", "vdd", "Питание коллектора оптопары"); r+=1
+        add_row(left, r, "Rpullup, Ω", "r_pullup", "↑R→больше усиление (через CTR·Rpullup/RLED), но ниже f_opto"); r+=1
+        add_row(left, r, "CTR(min)", "ctr_min", "Минимальный CTR в рабочей точке"); r+=1
+        add_row(left, r, "Copto, nF", "copto_nf", "Эфф. ёмкость коллектора оптопары (паразитика)"); r+=1
+        ttk.Separator(left, orient="horizontal").grid(row=r, column=0, columnspan=2, sticky="ew", pady=4); r+=1
+        add_row(left, r, "Vref TL431, V", "v_ref", "Опорное TL431 (≈2.5 В)"); r+=1
+        add_row(left, r, "Vf LED, V", "v_f_led", "Падение на LED при рабочем токе"); r+=1
+        add_row(left, r, "Vk work, V", "vk_work", "Рабочая точка катода TL431 (2.5 В по умолчанию)"); r+=1
+        add_row(left, r, "VCE(sat), V", "vce_sat", "Насыщение фототранзистора"); r+=1
+        add_row(left, r, "Idiv, µA", "i_div_uA", "Ток делителя TL431; ≥150 µA"); r+=1
+        add_row(left, r, "Vbias (zener), V", "v_bias_zener", "Стабилитрон узла смещения LED"); r+=1
+        add_row(left, r, "Ibias TL431, mA", "i_bias_mA", "Доп. ток смещения TL431 через Rbias"); r+=1
+        ttk.Separator(left, orient="horizontal").grid(row=r, column=0, columnspan=2, sticky="ew", pady=4); r+=1
+        add_row(left, r, "fb_min, V", "vfb_min", "Нижняя граница окна FB (мин. D)"); r+=1
+        add_row(left, r, "fb_max, V", "vfb_max", "Верхняя граница окна FB (макс. D)"); r+=1
+        ttk.Separator(left, orient="horizontal").grid(row=r, column=0, columnspan=2, sticky="ew", pady=4); r+=1
+        add_row(left, r, "fc, Hz", "fc", "Желаемая частота пересечения петли"); r+=1
+        add_row(left, r, "Gc(fc), dB", "gc_db", "Модуль компенсатор+опто в fc"); r+=1
+        add_row(left, r, "fz1, Hz", "fz1", "Первый нуль (0.2…0.4 fc)"); r+=1
+        add_row(left, r, "fz2, Hz", "fz2", "Второй нуль (0.7…1.0 fc)"); r+=1
+        add_row(left, r, "fp3, Hz", "fp3", "ВЧ полюс (2…4 fc)"); r+=1
+        add_row(left, r, "C1, nF", "c1_nf", "Ёмкость для fz1"); r+=1
+        add_row(left, r, "C2, nF", "c2_nf", "Ёмкость для fz2 (понижает f_opto)"); r+=1
+        add_row(left, r, "C3, nF", "c3_nf", "Ёмкость для fp3 (R3 подбирается)"); r+=1
+        add_row(left, r, "fp2, Hz", "fp2", "Доп. ВЧ полюс (Type‑2/3)"); r+=1
+
+        btns = ttk.Frame(left); btns.grid(row=r, column=0, columnspan=2, pady=6, sticky="w")
+        ttk.Button(btns, text="Load defaults from model", command=self.load_opto_defaults).pack(side="left", padx=2)
+        ttk.Button(btns, text="Open Optocoupler Library", command=lambda: OptoLibraryWindow(self, os.path.join(PACKAGE_DIR, "optocoupler_library.json"))).pack(side="left", padx=6)
+        ttk.Button(btns, text="Compute", command=self.compute_optocoupler, style="Accent.TButton").pack(side="left", padx=6)
+
+        
+        # Right: image + tabs
+        right = ttk.Frame(body); right.pack(side="left", fill="both", expand=True)
+        imgf = ttk.Frame(right, padding=(6,6,6,0)); imgf.pack(fill="x")
+        self.opto_img_label = ttk.Label(imgf)
+        self.opto_img_label.pack(anchor="w")
+        try:
+            candidates = ["Optocoupler.png","optocoupler.png","Optocoupler.PNG","optocoupler.PNG"]
+            img_path = None
+            for name in candidates:
+                pth = os.path.join(IMAGES_DIR, name)
+                if os.path.exists(pth):
+                    img_path = pth; break
+            if img_path:
+                self.opto_img = tk.PhotoImage(file=img_path)
+                self.opto_img_label.configure(image=self.opto_img)
+            else:
+                self.opto_img_label.configure(text="(optocoupler image not available)")
+        except Exception:
+            self.opto_img_label.configure(text="(optocoupler image not available)")
+
+        inner = ttk.Notebook(right); inner.pack(fill="both", expand=True, padx=6, pady=6)
+        res_tab = ttk.Frame(inner); inner.add(res_tab, text="Results")
+        info_tab = ttk.Frame(inner); inner.add(info_tab, text="Info")
+
+        # Results text widget
+        res_frame = ttk.Frame(res_tab)
+        res_frame.pack(fill="both", expand=True)
+        self.opto_text = tk.Text(res_frame, wrap="none", font=("Consolas", 10))
+        ysb = ttk.Scrollbar(res_frame, orient="vertical", command=self.opto_text.yview)
+        xsb = ttk.Scrollbar(res_frame, orient="horizontal", command=self.opto_text.xview)
         self.opto_text.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
         self.opto_text.grid(row=0, column=0, sticky="nsew")
         add_copy_menu(self.opto_text)
         ysb.grid(row=0, column=1, sticky="ns")
         xsb.grid(row=1, column=0, sticky="ew")
-        text_frame.columnconfigure(0, weight=1)
-        text_frame.rowconfigure(0, weight=1)
+        res_frame.columnconfigure(0, weight=1)
+        res_frame.rowconfigure(0, weight=1)
+
+        # Info text
+        info = tk.Text(info_tab, wrap="word", font=("Segoe UI", 10))
+        info.pack(fill="both", expand=True)
+        info.insert("1.0", OPTO_INFO_TEXT)
+        info.config(state="disabled")
+
+        # Preload defaults
+        try:
+            self.load_opto_defaults()
+        except Exception:
+            pass
+        self.on_comp_type_changed()
+
+    def load_opto_defaults(self):
+        # Take defaults from the normalized configuration (Inputs/Outputs)
+        cfg = self.collect_cfg()
+        cfg_norm = self.design.normalize_cfg(cfg)
+        vout = cfg_norm["outputs"][0]["v"]
+        fsw = cfg_norm["input"]["fsw"]
+        self.opto_vars["v_out"].set(str(vout))
+        self.opto_vars["f_sw"].set(str(fsw))
+
+    def compute_optocoupler(self, cfg_norm=None):
+        try:
+            if cfg_norm is None:
+                cfg = self.collect_cfg()
+                cfg_norm = self.design.normalize_cfg(cfg)
+            # Gather GUI values (with fallbacks)
+            g = {k: self.opto_vars[k].get().strip() for k in self.opto_vars}
+            # Where numbers expected, convert
+            def fget(k, default):
+                try:
+                    return float(g.get(k) or default)
+                except Exception:
+                    return float(default)
+            params = InputParams(
+                v_out = fget("v_out", cfg_norm["outputs"][0]["v"]),
+                f_sw  = fget("f_sw", cfg_norm["input"]["fsw"]),
+                vdd   = fget("vdd", 5.0),
+                r_pullup = fget("r_pullup", 20_000.0),
+                ctr_min  = fget("ctr_min", 0.3),
+                copto_nf = fget("copto_nf", 2.0),
+                v_ref    = fget("v_ref", 2.5),
+                v_f_led  = fget("v_f_led", 1.0),
+                vce_sat  = fget("vce_sat", 0.3),
+                i_div_uA = fget("i_div_uA", 250.0),
+                v_bias_zener = fget("v_bias_zener", 6.2),
+                i_bias_mA    = fget("i_bias_mA", 1.0),
+                fc      = fget("fc", 1000.0),
+                gc_db   = fget("gc_db", -10.0),
+                fz1     = fget("fz1", 300.0),
+                fz2     = fget("fz2", 900.0),
+                fp3     = fget("fp3", 3000.0),
+                c1_nf   = fget("c1_nf", 10.0),
+                c2_nf   = fget("c2_nf", 4.7),
+                c3_nf   = fget("c3_nf", "fp2", 1.0),
+                vk_work = fget("vk_work", 2.5),
+                vfb_min = fget("vfb_min", 2.0),
+                vfb_max = fget("vfb_max", 4.0),
+            )
+            report = compute_optocoupler(params)
+            text = report.get("report_text")
+            if not text:
+                lines = []
+                lines.append("=== TL431 + Optocoupler (Type‑3, no fast lane) ===")
+            for sec in ("inputs","derived","type3_network","achieved_at_fc","bias"):
+                lines.append(f"\n[{sec}]")
+                for k, v in report[sec].items():
+                    if isinstance(v, float):
+                        lines.append(f"{k:20s} = {v:.6g}")
+                    else:
+                        lines.append(f"{k:20s} = {v}")
+            if report.get("warnings"):
+                lines.append("\n[WARNINGS]")
+                for w in report["warnings"]:
+                    lines.append("! " + w)
+            self.opto_text.delete("1.0", "end")
+            self.opto_text.insert("1.0", text if 'text' in locals() and text else "\n".join(lines))
+        except Exception as e:
+            self.opto_text.delete("1.0", "end")
+            self.opto_text.insert("1.0", f"Error: {e}")
     def add_output(self):
         d = OutputDialog(self); self.wait_window(d)
         if d.result:
@@ -941,16 +1317,73 @@ class App(tk.Tk):
             if cfg_norm is None:
                 cfg = self.collect_cfg()
                 cfg_norm = self.design.normalize_cfg(cfg)
-            vout = cfg_norm["outputs"][0]["v"]
-            fsw = cfg_norm["input"]["fsw"]
-            params = InputParams(v_out=vout, f_sw=fsw)
+            g = {k: self.opto_vars[k].get().strip() for k in self.opto_vars}
+            def fget(k, default):
+                try:
+                    return float(g.get(k) or default)
+                except Exception:
+                    return float(default)
+            params = InputParams(
+                v_out = fget("v_out", cfg_norm["outputs"][0]["v"]),
+                f_sw  = fget("f_sw", cfg_norm["input"]["fsw"]),
+                vdd   = fget("vdd", 5.0),
+                r_pullup = fget("r_pullup", 20_000.0),
+                ctr_min  = fget("ctr_min", 0.3),
+                copto_nf = fget("copto_nf", 2.0),
+                v_ref    = fget("v_ref", 2.5),
+                v_f_led  = fget("v_f_led", 1.0),
+                vce_sat  = fget("vce_sat", 0.3),
+                i_div_uA = fget("i_div_uA", 250.0),
+                v_bias_zener = fget("v_bias_zener", 6.2),
+                i_bias_mA    = fget("i_bias_mA", 1.0),
+                fc      = fget("fc", 1000.0),
+                gc_db   = fget("gc_db", -10.0),
+                fz1     = fget("fz1", 300.0),
+                fz2     = fget("fz2", 900.0),
+                fp3     = fget("fp3", 3000.0),
+                c1_nf   = fget("c1_nf", 10.0),
+                c2_nf   = fget("c2_nf", 4.7),
+                c3_nf   = fget("c3_nf", 1.0),
+                fp2     = fget("fp2", 2000.0),
+                vk_work = fget("vk_work", 2.5),
+                vfb_min = fget("vfb_min", 2.0),
+                vfb_max = fget("vfb_max", 4.0),
+                opto_model = g.get("opto_model", ""),
+                comp_type = g.get("comp_type", "type3"),
+            )
             report = compute_optocoupler(params)
-            lines = [f"{k}: {v}" for k, v in report.items()]
             self.opto_text.delete("1.0", "end")
-            self.opto_text.insert("1.0", "\n".join(lines))
+            self.opto_text.insert("1.0", report.get("report_text", ""))
         except Exception as e:
             self.opto_text.delete("1.0", "end")
             self.opto_text.insert("1.0", f"Error: {e}")
+    def on_comp_type_changed(self, event=None):
+        t = self.opto_vars["comp_type"].get().strip().lower()
+        visible = {"c1_nf"}
+        if t == "type2":
+            visible.update({"fz1", "fp2", "c3_nf"})
+        elif t == "type3":
+            visible.update({"fz1", "fz2", "fp3", "c2_nf", "c3_nf"})
+        for key, frm in self.opto_field_frames.items():
+            if key in visible:
+                frm.grid()
+            else:
+                frm.grid_remove()
+        img_name = {
+            "type1": "Optocoupler_type1.png",
+            "type2": "Optocoupler_type2.png",
+            "type3": "Optocoupler_type3.png",
+        }.get(t, "Optocoupler.png")
+        pth = os.path.join(IMAGES_DIR, img_name)
+        if os.path.exists(pth):
+            self.opto_img = tk.PhotoImage(file=pth)
+            self.opto_img_label.configure(image=self.opto_img, text="")
+        else:
+            self.opto_img_label.configure(image="", text="(optocoupler image not available)")
+        try:
+            self.compute_optocoupler()
+        except Exception:
+            pass
     def run_sweep(self):
         if not hasattr(self.design, "sweep_k"):
             messagebox.showinfo("K-optimizer", "Sweep not supported for this topology")
