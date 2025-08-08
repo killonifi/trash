@@ -20,6 +20,9 @@ FERRITE_RHO_KG_PER_M3 = 4800.0
 PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PACKAGE_DIR, "data")
 DEFAULT_CORELIB = os.path.join(DATA_DIR, "core_library.json")
+if not os.path.exists(DEFAULT_CORELIB):
+    # Fallback to legacy location when packaged without a data/ folder
+    DEFAULT_CORELIB = os.path.join(PACKAGE_DIR, "core_library.json")
 
 def parse_num(s):
     if isinstance(s, (int, float)): return float(s)
