@@ -989,7 +989,7 @@ class App(tk.Tk):
                 fp3     = fget("fp3", 3000.0),
                 c1_nf   = fget("c1_nf", 10.0),
                 c2_nf   = fget("c2_nf", 4.7),
-                c3_nf   = fget("c3_nf", "fp2", 1.0),
+                c3_nf   = fget("c3_nf", 1.0),
                 vk_work = fget("vk_work", 2.5),
                 vfb_min = fget("vfb_min", 2.0),
                 vfb_max = fget("vfb_max", 4.0),
@@ -1023,7 +1023,8 @@ class App(tk.Tk):
         left = ttk.Frame(body, padding=6); left.pack(side="left", fill="y")
         self.opto_vars = {k: tk.StringVar() for k in [
             "v_out","f_sw","vdd","r_pullup","ctr_min","copto_nf","v_ref","v_f_led","vce_sat",
-            "i_div_uA","v_bias_zener","i_bias_mA","fc","gc_db","fz1","fz2","fp3","c1_nf","c2_nf","c3_nf", "fp2", "vk_work", "vfb_min", "vfb_max", "opto_model", "comp_type"
+            "i_div_uA","v_bias_zener","i_bias_mA","fc","gc_db","fz1","fz2","fp3","c1_nf","c2_nf","c3_nf",
+            "vk_work", "vfb_min", "vfb_max", "opto_model", "comp_type"
         ]}
         # defaults
         self.opto_vars["v_out"].set("12.0")
@@ -1050,10 +1051,9 @@ class App(tk.Tk):
         self.opto_vars["c1_nf"].set("10.0")
         self.opto_vars["c2_nf"].set("4.7")
         self.opto_vars["c3_nf"].set("1.0")
-        self.opto_vars["fp2"].set("2000")
 
         self.opto_field_frames = {}
-        network_fields = {"fz1", "fz2", "fp3", "fp2", "c2_nf", "c3_nf", "v_bias_zener"}
+        network_fields = {"fz1", "fz2", "fp3", "c2_nf", "c3_nf", "v_bias_zener"}
 
         def add_row(parent, r, label, key, hint=None):
             frm = ttk.Frame(parent); frm.grid(row=r, column=0, columnspan=2, sticky="w", pady=1)
@@ -1103,7 +1103,6 @@ class App(tk.Tk):
         add_row(left, r, "C1, nF", "c1_nf", "Ёмкость для fz1"); r+=1
         add_row(left, r, "C2, nF", "c2_nf", "Ёмкость для fz2 (понижает f_opto)"); r+=1
         add_row(left, r, "C3, nF", "c3_nf", "Ёмкость для fp3 (R3 подбирается)"); r+=1
-        add_row(left, r, "fp2, Hz", "fp2", "Доп. ВЧ полюс (Type‑2/3)"); r+=1
 
         btns = ttk.Frame(left); btns.grid(row=r, column=0, columnspan=2, pady=6, sticky="w")
         ttk.Button(btns, text="Load defaults from model", command=self.load_opto_defaults).pack(side="left", padx=2)
@@ -1204,7 +1203,7 @@ class App(tk.Tk):
                 fp3     = fget("fp3", 3000.0),
                 c1_nf   = fget("c1_nf", 10.0),
                 c2_nf   = fget("c2_nf", 4.7),
-                c3_nf   = fget("c3_nf", "fp2", 1.0),
+                c3_nf   = fget("c3_nf", 1.0),
                 vk_work = fget("vk_work", 2.5),
                 vfb_min = fget("vfb_min", 2.0),
                 vfb_max = fget("vfb_max", 4.0),
@@ -1344,7 +1343,6 @@ class App(tk.Tk):
                 c1_nf   = fget("c1_nf", 10.0),
                 c2_nf   = fget("c2_nf", 4.7),
                 c3_nf   = fget("c3_nf", 1.0),
-                fp2     = fget("fp2", 2000.0),
                 vk_work = fget("vk_work", 2.5),
                 vfb_min = fget("vfb_min", 2.0),
                 vfb_max = fget("vfb_max", 4.0),
@@ -1644,5 +1642,20 @@ def save_report(self):
         if not path: return
         open(path,"w",encoding="utf-8").write(data)
         messagebox.showinfo("Saved", path)
+
+# Bind standalone functions as methods of App
+App.on_comp_type_changed = on_comp_type_changed
+App.run_sweep = run_sweep
+App.apply_best = apply_best
+App.handle_chat_changes = handle_chat_changes
+App.find_var = find_var
+App.setup_undo = setup_undo
+App._track_var = _track_var
+App.undo = undo
+App.redo = redo
+App.show_results = show_results
+App.save_json = save_json
+App.load_json = load_json
+App.save_report = save_report
 if __name__ == "__main__":
     app = App(); app.mainloop()
