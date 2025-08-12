@@ -456,7 +456,6 @@ class InputParams:
     i_div_uA: float = 250.0
     v_bias_zener: float = 6.2
     i_bias_mA: float = 1.0
-    vk_work: float = 2.5
     vfb: float = 2.5  # FB reference of PWM controller (Vfb comparator threshold)
     # Loop shaping parameters ----------------------------------------------
     fc: float = 1000.0
@@ -492,7 +491,7 @@ def compute_optocoupler(p: InputParams) -> Dict[str, Any]:
         boost_deg=p.boost_deg if p.comp_type != "type1" else None,
         vout=p.v_out,
         fsw_hz=p.f_sw,
-        vfb_ref=(p.vfb if hasattr(p, 'vfb') and p.vfb is not None else p.vk_work),
+        vfb_ref=p.vfb,
         params=user,
     )
 
@@ -509,7 +508,7 @@ def compute_optocoupler(p: InputParams) -> Dict[str, Any]:
     # Build a simple human‑readable report
     
     # DC sanity check: with Rpullup and target Vfb, required collector current:
-    Vfb_target = (p.vfb if hasattr(p, 'vfb') and p.vfb is not None else p.vk_work)
+    Vfb_target = p.vfb
     Ifb_req = max((p.vdd - Vfb_target) / p.r_pullup, 0.0)
     # Required LED dc current from CTR_min (worst case):
     CTRmin = p.ctr_min
