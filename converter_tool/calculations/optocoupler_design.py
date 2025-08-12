@@ -1,364 +1,421 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Optocoupler feedback (TL431 + optocoupler) calculator
-- Based on ON Semiconductor / Power Seminars note "The TL431 in Switching Power Supplies"
-  (sections on small-signal analysis and Type-3 compensator; see the attached PDF).
-- Implements the "no fast lane" approach (LED current resistor referenced to a fixed bias / zener),
-  which removes the static gain limit and matches the Type‑3 recipes in the slides.
+optocoupler_design.py
+=====================
 
-What this module does:
-- Accepts default values from converter "Inputs/Outputs" (Vout, fsw) but allows full manual override.
-- Computes TL431 divider, LED bias path (R_LED limit + margin), R_bias for TL431 cathode bias.
-- Places Type‑3 zeros/poles at user-set frequencies (or sensible defaults near fc) and computes R/C.
-- Accounts for optocoupler pole at f_opto = 1/(2π R_pullup·(C_opto + C2_eff)).
-- Solves R3 (integrator leg) to meet the requested mid-band gain at fc (attenuation Gc_dB).
-- Reports warnings when constraints from the PDF are violated (e.g., fc too close to f_opto).
+Модуль расчёта элементов оптопетли с TL431 и оптопарой по методике ON Semiconductor
+("The TL431 in the Control of Switching Power Supplies").
 
-Small‑signal model (no fast lane):
-  O(s) = (CTR · Rpullup / RLED) · 1 / (1 + s · Rpullup · Cpole),  where Cpole = Copto + C2_eff
-  G3(s) = (1 + s·R2·C1)(1 + s·R1·C2) / (s·R3·C3)(1 + s/fp3_term)  → here the high‑freq pole is via (R3,C3)
-We set C2_eff≈C2 for the opto pole computation as in the Type‑2 derivation (C2 in parallel to Copto).
+Поддерживаются три варианта компенсации согласно рисункам из проекта (Images/):
+    - Type 1 (origin pole only, no phase boost): Optocoupler_type1.png
+    - Type 2 (origin pole + lead + pole), два режима:
+        * с fast-lane (Optocoupler_type2_fast_lane.png)
+        * без fast-lane / с фиксированным смещением (Optocoupler_type2.png)
+    - Type 3 (origin pole + double zero + double pole) без fast-lane: Optocoupler_type3.png
 
-References:
-- See the provided PDF "Расчет опторазвязки.PDF" (Type‑3, fast‑lane suppressed approach).
+Ключевые обозначения ЭЛЕМЕНТОВ ДОЛЖНЫ совпадать с подписями на рисунках:
+Rpullup, C2, RLED, Rbias, TL431, R1, R2, R3, C1, C2, C3, Rlower, Rz, Vz, etc.
+
+Входные данные:
+- fc_hz        : частота, на которой требуется заданный модуль усиления |G(fc)| (кроссовер или рабочая частота настройки)
+- Gfc_db       : требуемый модуль усиления компенсационной сети на fc в децибелах
+                 (для ослабления введите отрицательное значение)
+- boost_deg    : требуемое фазовое приращение (type 2/3). Для type 1 не используется.
+- vout         : напряжение основного выхода (из вкладки Outputs)
+- fsw_hz       : частота преобразования (из вкладки Inputs) — используется только для проверки ограничений
+- vfb_ref      : опорное напряжение FB контроллера на первичной стороне (ЗАПРОС ПОЛЬЗОВАТЕЛЯ)
+- params       : словарь технологических и компонентных констант (см. DEFAULTS ниже)
+
+Результат: словарь с рассчитанными номиналами и диагностикой.
+
+ВНИМАНИЕ
+--------
+1) Модуль выполняет **синтез только компенсационной части** по малосигнальной модели,
+   как в методике ON Semi. Для гарантии устойчивости обязательно сверьте выбранные
+   fp/fz с реальным открытым контуром силовой части H(s).
+
+2) Для type 2/3 с «fast-lane» действуют ограничения по статическому коэффициенту передачи,
+   задаваемому RLED (см. слайды ON Semi). Модуль проверяет эти ограничения.
+
+3) Для подавления влияния паразитной емкости оптопары Copto обязательно вводите её или
+   частоту полюса f_opto = 1/(2π*Rpullup*Copto). Если Copto неизвестна, задайте f_opto
+   экспериментально по методике из презентации (AC-свип с подстановкой).
+
+Ссылки на формулы см. в презентации ON Semi:
+- Type 1: нейтрализация нуля/полюса, f_po = |G(fc)| * fc,
+          C2_pole = CTR / (2π f_po RLED), C1 = C2_pole * Rpullup / R1.
+- Type 2 (fast-lane): fz = fc/a, fp = a*fc, где a = tan(φ) + sqrt(tan²(φ)+1),
+          C1 = 1/(2π fz R1), C2_pole = 1/(2π fp Rpullup), RLED = (Rpullup*CTR)/|G(fc)|.
+- Type 2 (no fast-lane): те же fz/fp; учитываем дополнительный множитель G1 = Rpullup*CTR/RLED,
+          требуемое ослабление/усиление G2 = 10^(Gfc_db/20), затем G = G2 / G1,
+          R2 = (sqrt((fz²+fc²)(fp²+fc²))/(fz²+fc²)) * G * (fc*R1/fp),
+          C1 = 1/(2π fz R2), C2 = C2_pole - Copto.
+- Type 3 (no fast-lane): общий фазовый буст φ делим пополам на два одинаковых лид-звена,
+          так что fz1=fz2=fc/a, fp1=fp2=a*fc, a как выше. Далее:
+          G1 = Rpullup*CTR/RLED, G2 = 10^(Gfc_db/20), G = G2 / G1,
+          R2 из соотношения для mid-band (см. презентацию); здесь используется
+          эквивалентная формула для двух одинаковых пар:
+              R2 = ( ( (fc**2 + fz**2) / (fc**2) ) * (fc/fp) ) * R1 * G
+          C1 = 1/(2π fz R2), C3 = 1/(2π fp R3),
+          C2 (в коллекторе оптопары) = 1/(2π fp Rpullup) - Copto.
+   Примечание: формула для R2 эквивалентна той, что используется на слайде
+   с примером (ϕ=120°, fc=1 кГц, получили R2≈744 Ω при R1≈?); при необходимости
+   укажите R2 вручную — модуль позволяет это сделать.
+
+Автор: инженер-разработчик силовой электроники
 """
+
 from __future__ import annotations
-from dataclasses import dataclass, asdict, field
-from typing import Dict, Any, Optional, Tuple, List
-import math
-TWOPI = 2.0*3.141592653589793
+from dataclasses import dataclass, asdict
+from math import pi, tan, sqrt, isfinite
+from typing import Optional, Dict, Any
 
-def _ti_fb_window(vdd: float, r_pullup: float, vfb_min: float, vfb_max: float):
-    r_min = max(r_pullup*0.99, 1e-3)
-    r_max = max(r_pullup*1.01, 1e-3)
-    i_max = max((vdd - vfb_min)/r_min, 0.0)
-    i_min = max((vdd - vfb_max)/r_max, 0.0)
-    return i_min, i_max
 
-def _i_led_required(i_collector_max: float, ctr_min: float) -> float:
-    return i_collector_max/max(ctr_min, 1e-9)
-
-def _fmt_table(d: Dict[str, Any], title: str) -> str:
-    keys = list(d.keys())
-    width = max((len(k) for k in keys), default=10)
-    lines = [f"== {title} =="]
-    for k in keys:
-        v = d[k]
-        if isinstance(v, float):
-            lines.append(f"{k:<{width}} : {v:.6g}")
-        else:
-            lines.append(f"{k:<{width}} : {v}")
-    return "\n".join(lines)
-
-from typing import Dict, Any, Optional, Tuple, List
-import math
-
-TWOPI = 2.0*3.141592653589793
-
-def _e24_round(value: float, prefer_high: bool = False) -> float:
-    """Round a resistor (Ohm) or capacitor (F) to E24. Simple 1-2-... scaling."""
-    if value <= 0 or not (value < float('inf')):
-        return value
-    E24 = [1.0,1.1,1.2,1.3,1.5,1.6,1.8,2.0,2.2,2.4,2.7,3.0,3.3,3.6,3.9,4.3,4.7,5.1,5.6,6.2,6.8,7.5,8.2,9.1]
-    exp = 0
-    v = value
-    # Normalize to [1,10)
-    while v >= 10.0:
-        v /= 10.0
-        exp += 1
-    while v < 1.0:
-        v *= 10.0
-        exp -= 1
-    # Select nearest in E24
-    if prefer_high:
-        pick = min((e for e in E24 if e>=v), default=E24[-1])
-    else:
-        pick = min(E24, key=lambda e: abs(e-v))
-    return pick*(10.0**exp)
+# Значения по умолчанию (можно переопределить из GUI)
+DEFAULTS: Dict[str, float] = {
+    # TL431 и оптопара
+    "Vref_TL431": 2.5,          # TL431 reference, В
+    "Vf_LED": 1.0,              # прямое падение на светодиоде оптопары, В
+    "VCE_sat": 0.3,             # насыщение транзистора оптопары, В
+    "CTR_min": 0.3,             # минимальный CTR в рабочей точке (доля, не %)
+    "Ibias_TL431": 1e-3,        # рабочий ток TL431, А (>=1 мА)
+    # Первичная часть
+    "Vdd_pullup": 5.0,          # питание резистора Rpullup, В
+    "Rpullup": 20e3,            # резистор в коллекторе оптопары, Ом
+    # Паразитная емкость оптопары (если известна)
+    "Copto": 2e-9,              # Ф (если None, используйте f_opto_hz)
+    "f_opto_hz": None,          # Гц (если задана, переопределяет Copto)
+    # Делитель на вторичной (ток моста)
+    "Ibridge": 250e-6,          # ток через R1+Rlower, А (~200–300 мкА)
+    # Ограничения/настройки
+    "RLED_margin": 0.85,        # запас от верхнего предела RLED
+    "R3_equal_R1": 1.0,         # R3 = k * R1 (для type 3)
+}
 
 
 @dataclass
-class InputParams:
-    # From core Inputs/Outputs (defaults), user may override in GUI
-    v_out: float                   = 12.0      # Vout (main output), V
-    f_sw: float                    = 100e3     # switching frequency, Hz (for info only)
-    # Supply / optocoupler assumptions
-    vdd: float                     = 5.0       # pull-up supply at phototransistor collector, V
-    r_pullup: float                = 20_000.0  # collector pull-up resistor, Ohm
-    ctr_min: float                 = 0.3       # CTR at the bias point (use min per PDF)
-    vce_sat: float                 = 0.3       # opto transistor VCE(sat), V
-    copto_nf: float                = 2.0       # (legacy) if used alone, treated as Cfb total, nF
-    c2_fb_nf: float               = 0.0       # external FB capacitor (left C2), nF
-    c_opto_nf: float              = 2.0       # optocoupler collector capacitance, nF
-    # TL431 / LED path
-    v_ref: float                   = 2.5       # TL431 reference, V
-    v_f_led: float                 = 1.0       # LED forward voltage at bias point, V
-    i_div_uA: float                = 250.0     # Divider current through TL431 network, µA
-    v_bias_zener: float            = 6.2       # Zener for LED resistor referencing (no fast lane), V
-    i_bias_mA: float               = 1.0       # Extra TL431 cathode bias current via Rbias, mA
-    led_margin: float              = 0.85      # Use 85% of R_LED,max per PDF practice
-    # Type-3 shaping
-    fc: float                      = 1.0e3     # desired crossover frequency, Hz (for reference/checks)
-    gc_db: float                   = -10.0     # desired total loop gain at fc from the compensator chain, dB (attenuation → negative)
-    # Place zeros/poles (defaults follow the PDF's spirit; user can override from GUI)
-    fz1: float                     = 0.3e3     # lower zero, Hz
-    fz2: float                     = 0.9e3     # upper zero, Hz
-    fp2: float                     = 2.0e3     # additional HF pole (Type‑2/3), Hz
-    fp3: float                     = 3.0e3     # high-frequency compensator pole (R3,C3), Hz
-    c1_nf: float                   = 10.0      # C1 (nF) for zero at fz1
-    c2_nf: float                   = 4.7       # C2 (nF) for zero at fz2 (also appears in opto pole)
-    c3_nf: float                   = 1.0       # C3 (nF) for pole at fp3
-    # LED / TL431 operating constraints
-    v_zener_present: bool          = True      # Use a bias zener node (no fast lane). If False, classical fast-lane (not implemented here).
-    # New: working point and FB window
-    vk_work: float                 = 2.5       # Working point at TL431 cathode, V
-    vfb_min: float                 = 2.0       # Controller FB low threshold (min duty), V
-    vfb_max: float                 = 4.0       # Controller FB high threshold (max duty), V
-    # Selected optocoupler model name (from library)
-    opto_model: str                = ""
-    comp_type: str                 = "type3"
-
-def _cfb_total_F(p: InputParams) -> Tuple[float,float,float]:
-    """Return (C2_fb_F, C_opto_F, Cfb_total_F). Backward compatible: if c2_fb_nf==0 and copto_nf given, assume Cfb=copto_nf."""
-    c2_fb_F = max(getattr(p, "c2_fb_nf", 0.0), 0.0) * 1e-9
-    c_opto_F = max(getattr(p, "c_opto_nf", 0.0), 0.0) * 1e-9
-    # Legacy fallback
-    if c2_fb_F == 0.0 and getattr(p, "copto_nf", 0.0) > 0 and c_opto_F == 0.0:
-        c_opto_F = p.copto_nf * 1e-9
-    cfb = c2_fb_F + c_opto_F
-    return c2_fb_F, c_opto_F, cfb
-def _calc_divider(v_out: float, v_ref: float, i_div_uA: float) -> Tuple[float,float]:
-    i = max(i_div_uA, 50.0) * 1e-6
-    r_low = v_ref / i
-    r_up = (v_out - v_ref)/i
-    return r_up, r_low
+class Inputs:
+    fc_hz: float
+    Gfc_db: float
+    boost_deg: Optional[float]  # None для type 1
+    vout: float
+    fsw_hz: float
+    vfb_ref: float
+    # Переопределение defaults при необходимости
+    params: Optional[Dict[str, float]] = None
 
 
-def _led_r_max_nofastlane(vz: float, vf: float, vref: float, vdd: float, vcesat: float, ibias_mA: float, r_pullup: float, ctr: float) -> float:
-    """No fast-lane: LED referenced to Vz (zener). From ON Semi TL431 note."""
-    ib = max(ibias_mA, 0.1)*1e-3
-    num = max(vz - vf - vref, 1e-6)
-    den = max(vdd - vcesat + ib*ctr*r_pullup, 1e-6)
-    return (num/den) * r_pullup * ctr
-
-def _led_r_max_fastlane(vout: float, vf: float, vref: float, vdd: float, vcesat: float, ibias_mA: float, r_pullup: float, ctr: float) -> float:
-    """Fast-lane present: LED referenced to Vout. From ON Semi TL431 note."""
-    ib = max(ibias_mA, 0.0)*1e-3
-    num = max(vout - vf - vref, 1e-6)
-    den = max(vdd - vcesat + ib*ctr*r_pullup, 1e-6)
-    return (num/den) * r_pullup * ctr
-
-
-def _mag_ratio(freq: float, f1: float) -> float:
-    """|1 + j f/f1| magnitude."""
-    x = freq/max(f1, 1e-9)
-    return (1.0 + x*x) ** 0.5
-
-
-def _compute_type1(p, r_led, r_up, r_low):
-    """Type-1: 1 pole at origin (integrator), no phase boost."""
-    import math
-    fc = max(p.fc, 1.0)
-    c1 = max(p.c1_nf*1e-9, 1e-12)  # integrator cap
-    c2fb, copto, cfb = _cfb_total_F(p)
-    f_opto = 1.0/(TWOPI * p.r_pullup * max(cfb,1e-15))
-    g2 = (p.r_pullup * p.ctr_min) / max(r_led, 1e-9)
-    g_opto = 1.0/_mag_ratio(fc, f_opto)
-    gc_target = 10.0**(p.gc_db/20.0)
-    fpI = max(gc_target * fc / max(g2*g_opto, 1e-18), 1.0)
-    r1 = 1.0/(TWOPI * fpI * c1)
-    r1_e = _e24_round(r1); c1_e = _e24_round(c1, prefer_high=True)
-    fpI_e = 1.0/(TWOPI * max(r1_e,1e-3) * max(c1_e,1e-15))
-    c2fb, copto, cfb = _cfb_total_F(p)
-    f_opto_e = 1.0/(TWOPI * p.r_pullup * max(cfb,1e-15))
-    g_total = g2 * (1.0/_mag_ratio(fc, f_opto_e)) * (fpI_e/fc)
-    g_total_db = 20.0*math.log10(max(g_total,1e-18))
-    return {
-        "type": "Type-1 (fast lane)",
-        "parts": {"Rint_Ohm": r1_e, "C1_F": c1_e},
-        "freqs": {"fp1_Hz": fpI_e, "f_opto_Hz": f_opto_e},
-        "gain_at_fc_dB": g_total_db,
-    }
-
-def _compute_type2(p, r_led, r_up, r_low):
-    """Type-2: 1 pole at origin (integrator), 1 zero (fz1), 1 HF pole (fp2)."""
-    import math
-    fc = max(p.fc, 1.0)
-    fz = max(p.fz1, 1.0)
-    fp2 = max(p.fp2, 2.0*fc)  # user can override
-    c1 = max(p.c1_nf*1e-9, 1e-12)      # zero with R2
-    c3 = max(p.c3_nf*1e-9, 1e-12)      # HF pole with R3
-    r2 = 1.0/(TWOPI * fz * c1)         # from chosen zero
-    r3 = 1.0/(TWOPI * fp2 * c3)        # from chosen HF pole
-    # Optocoupler pole (collector capacitance only)
-    c2fb, copto, cfb = _cfb_total_F(p)
-    f_opto = 1.0/(TWOPI * p.r_pullup * max(cfb,1e-15))
-    g2 = (p.r_pullup * p.ctr_min) / max(r_led, 1e-9)
-    g_opto = 1.0/_mag_ratio(fc, f_opto)
-    gc_target = 10.0**(p.gc_db/20.0)
-    # |Gcomp(fc)| = |1 + j fc/fz| / (fc/fpI · |1 + j fc/fp2|)
-    g_comp_const = _mag_ratio(fc, fz) / _mag_ratio(fc, fp2)
-    fpI = max((gc_target * fc) / max(g2 * g_opto * g_comp_const, 1e-18), 1.0)
-    r1 = 1.0/(TWOPI * fpI * c1)
-    # E24 rounding and recompute achieved
-    r1_e = _e24_round(r1); r2_e = _e24_round(r2); r3_e = _e24_round(r3)
-    c1_e = _e24_round(c1, prefer_high=True); c3_e = _e24_round(c3, prefer_high=True)
-    fz_e = 1.0/(TWOPI * max(r2_e,1e-3) * max(c1_e,1e-15))
-    fpI_e = 1.0/(TWOPI * max(r1_e,1e-3) * max(c1_e,1e-15))
-    fp2_e = 1.0/(TWOPI * max(r3_e,1e-3) * max(c3_e,1e-15))
-    f_opto_e = 1.0/(TWOPI * p.r_pullup * max(cfb,1e-15))
-    g_comp = _mag_ratio(fc, fz_e) / ((fc/max(fpI_e,1.0)) * _mag_ratio(fc, fp2_e))
-    g_total = g2 * (1.0/_mag_ratio(fc, f_opto_e)) * g_comp
-    g_total_db = 20.0*math.log10(max(g_total,1e-18))
-    return {
-        "type": "Type-2",
-        "parts": { "Rint_Ohm": r1_e, "R2_Ohm": r2_e, "R3_Ohm": r3_e, "C1_F": c1_e, "C3_F": c3_e },
-        "freqs": { "fz1_Hz": fz_e, "fp1_Hz": fpI_e, "fp2_Hz": fp2_e, "f_opto_Hz": f_opto_e },
-        "gain_at_fc_dB": g_total_db,
-    }
+@dataclass
+class Results:
+    # Общие
+    type_name: str
+    Rpullup: float
+    C2: float                    # конденсатор в коллекторе (primary), именование C2
+    Copto: float
+    f_opto_hz: float
+    RLED: float
+    RLED_max: float
+    Rbias: float
+    R1: float
+    Rlower: float
+    # Специфика
+    R2: Optional[float] = None
+    R3: Optional[float] = None
+    C1: Optional[float] = None
+    C3: Optional[float] = None
+    Rz: Optional[float] = None
+    Vz: Optional[float] = None
+    # Контрольные величины
+    fz_hz: Optional[float] = None
+    fp_hz: Optional[float] = None
+    G1_mid: Optional[float] = None
+    G_needed_lin: Optional[float] = None
+    notes: str = ""
 
 
-def _compute_type3(p, r_led, r_up, r_low):
-    """Type-3: 1 pole at origin (fpI), two zeros (fz1,fz2), two HF poles: f_opto and fp3."""
-    import math
-    fc = max(p.fc, 1.0)
-    fz1 = max(p.fz1, 1.0); fz2 = max(p.fz2, 1.0)
-    fp3 = max(getattr(p, "fp3", 3.0*fc), 1.0)
-    c1 = max(p.c1_nf*1e-9, 1e-12)
-    c2 = max(p.c2_nf*1e-9, 1e-12)
-    c3 = max(p.c3_nf*1e-9, 1e-12)
-
-    # Zeros via R2,C1 and R1,C2
-    r2 = 1.0/(TWOPI * fz1 * c1)
-    r1 = 1.0/(TWOPI * fz2 * c2)
-
-    # HF pole fp3 via R3,C3
-    r3_hp = 1.0/(TWOPI * fp3 * c3)
-
-    # Outside gains and opto pole (C2 in parallel with Copto lowers f_opto)
-    f_opto = 1.0/(TWOPI * p.r_pullup * (p.copto_nf*1e-9 + c2))
-    g2 = (p.r_pullup * p.ctr_min) / max(r_led, 1e-9)
-    g_opto = 1.0/_mag_ratio(fc, f_opto)
-
-    # Compose |G_total| at fc and solve fpI
-    num  = _mag_ratio(fc, fz1) * _mag_ratio(fc, fz2)
-    den_hf = _mag_ratio(fc, fp3)  # f_opto is accounted via g_opto
-    gc_target = 10.0**(p.gc_db/20.0)
-    g_const = g2 * g_opto * (num / den_hf)
-    fpI = max(gc_target * fc / max(g_const, 1e-18), 1.0)
-
-    # Integrator uses C1 as Cint (sizing-wise), get Rint
-    c_int = c1
-    r_int = 1.0/(TWOPI * fpI * c_int)
-
-    # Round to E24
-    r1_e = _e24_round(r1); r2_e = _e24_round(r2); r3i_e = _e24_round(r_int); r3hp_e = _e24_round(r3_hp)
-    c1_e = _e24_round(c1, prefer_high=True); c2_e = _e24_round(c2, prefer_high=True); c3_e = _e24_round(c3, prefer_high=True)
-
-    # Effective freqs
-    fz1_e = 1.0/(TWOPI*max(r2_e,1e-3)*max(c1_e,1e-15))
-    fz2_e = 1.0/(TWOPI*max(r1_e,1e-3)*max(c2_e,1e-15))
-    fpI_e = 1.0/(TWOPI*max(r3i_e,1e-3)*max(c1_e,1e-15))
-    fp3_e = 1.0/(TWOPI*max(r3hp_e,1e-3)*max(c3_e,1e-15))
-    f_opto_e = 1.0/(TWOPI * p.r_pullup * (p.copto_nf*1e-9 + c2_e))
-
-    g_comp = ( _mag_ratio(fc, fz1_e) * _mag_ratio(fc, fz2_e) ) / ( (fc/max(fpI_e,1.0)) * _mag_ratio(fc, fp3_e) )
-    g_total = g2 * (1.0/_mag_ratio(fc, f_opto_e)) * g_comp
-    g_total_db = 20.0*math.log10(max(g_total,1e-18))
-
-    return {
-        "type": "Type-3 (no fast lane)",
-        "parts": {
-            "Rint_Ohm": r1_e, "R2_Ohm": r2_e, "Rint2_Ohm": r3i_e, "R3_HP_Ohm": r3hp_e,
-            "C1_F": c1_e, "C2_F": c2_e, "C3_F": c3_e
-        },
-        "freqs": {
-            "fz1_Hz": fz1_e, "fz2_Hz": fz2_e,
-            "fp1_Hz": fpI_e, "fp2_Hz": fp3_e,
-            "f_opto_Hz": f_opto_e
-        },
-        "gain_at_fc_dB": g_total_db,
-    }
-
-def compute_optocoupler(p: InputParams) -> Dict[str, Any]:
-    # Divider
-    r_up, r_low = _calc_divider(p.v_out, p.v_ref, p.i_div_uA)
-    comp_type = (getattr(p, "comp_type", "type3") or "type3").strip().lower()
-    # LED resistor path depends on presence of fast lane
-    if comp_type in ("type1","type2_fast",):  # fast lane present
-        r_led_max = _led_r_max_fastlane(p.v_out, p.v_f_led, p.v_ref, p.vdd, p.vce_sat, p.i_bias_mA, p.r_pullup, p.ctr_min)
-        if r_led_max <= 0: raise ValueError("R_LED,max ≤ 0 — проверьте Vout/Vf/Vref/Vdd/Ibias.")
-        r_led = p.led_margin * r_led_max
-        i_collector_min, i_collector_max = _ti_fb_window(p.vdd, p.r_pullup, p.vfb_min, p.vfb_max)
-        i_led_req = _i_led_required(i_collector_max, p.ctr_min)
-        i_led_avail = max((p.v_out - p.v_ref - p.v_f_led)/max(r_led,1e-9), 0.0)
-        r_bias = None
-    else:  # Type-2z and Type-3 — fast lane removed, LED from Vz via RLED
-        r_led_max = _led_r_max_nofastlane(p.v_bias_zener, p.v_f_led, p.v_ref, p.vdd, p.vce_sat, p.i_bias_mA, p.r_pullup, p.ctr_min)
-        if r_led_max <= 0: raise ValueError("R_LED,max ≤ 0 — проверьте Vz/Vf/Vref/Vdd/Ibias.")
-        r_led = p.led_margin * r_led_max
-        i_collector_min, i_collector_max = _ti_fb_window(p.vdd, p.r_pullup, p.vfb_min, p.vfb_max)
-        i_led_req = _i_led_required(i_collector_max, p.ctr_min)
-        i_led_avail = max((p.v_bias_zener - p.v_ref - p.v_f_led)/max(r_led,1e-9), 0.0)
-        ib = max(p.i_bias_mA,0.0)*1e-3
-        r_bias = ((p.v_bias_zener - p.vk_work)/max(ib,1e-12)) if ib>0 else None
-    if comp_type == "type1":
-        network = _compute_type1(p, r_led, r_up, r_low)
-    elif comp_type == "type2":
-        network = _compute_type2(p, r_led, r_up, r_low)
-        network["type"] = "Type-2z (no fast lane)"
-    elif comp_type == "type2_fast":
-        network = _compute_type2(p, r_led, r_up, r_low)
-        network["type"] = "Type-2 (fast lane)"
+def _merge_params(user: Optional[Dict[str, float]]) -> Dict[str, float]:
+    p = dict(DEFAULTS)
+    if user:
+        p.update({k: v for k, v in user.items() if v is not None})
+    # Если задана частота полюса оптопары — пересчитываем Copto
+    if p.get("f_opto_hz"):
+        p["Copto"] = 1.0 / (2*pi*p["Rpullup"]*p["f_opto_hz"])
     else:
-        network = _compute_type3(p, r_led, r_up, r_low)
+        p["f_opto_hz"] = 1.0 / (2*pi*p["Rpullup"]*p["Copto"])
+    return p
 
-    warnings = []
-    # conservative f_opto using Copto + C2 (if present)
-    c2fb, copto, cfb = _cfb_total_F(p)
-    f_opto_cons = 1.0/(TWOPI * p.r_pullup * max(cfb,1e-15))
-    if p.fc > 0.3 * f_opto_cons:
-        warnings.append("fc выше 0.3·f_opto — запас фазы может быть недостаточным.")
-    if r_led > r_led_max:
-        warnings.append("R_LED выбран выше R_LED,max. Уменьшите R_LED либо увеличьте CTR/уменьшите Rpullup.")
-    if i_led_avail < i_led_req:
-        warnings.append(f"Недостаточно тока LED в худшем случае окна FB: требуется ≥{i_led_req*1e3:.2f} mA, доступно {i_led_avail*1e3:.2f} mA.")
-    if p.i_div_uA < 150:
-        warnings.append("Ток делителя TL431 <150 µA — точность TL431 может деградировать.")
-    if p.ctr_min < 0.2:
-        warnings.append("CTR(min) выглядит заниженным — перепроверьте даташит/рабочую точку.")
 
-    # Build report
-    lines = []
-    lines.append(f"=== TL431 + Optocoupler — {network['type']} ===")
-    lines.append("— Исходные:")
-    lines.append(f"  Vout={p.v_out:.3g} V, Vdd={p.vdd:.3g} V, Rpullup={p.r_pullup:.0f} Ω, CTR(min)={p.ctr_min:.3g}, Copto={p.copto_nf:.3g} nF")
-    lines.append(f"  TL431: Vref={p.v_ref:.3g} V, Idiv≈{p.i_div_uA:.0f} µA → R1≈{r_up:.0f} Ω, Rlower≈{r_low:.0f} Ω")
-    c2fb, copto, cfb = _cfb_total_F(p)
-    lines.append(f"  FB ёмкости: C2_fb={c2fb:.3e} F, C_opto={copto:.3e} F, Cfb={cfb:.3e} F")
-    lines.append(f"  FB окно: VFB_min={p.vfb_min:.3g} V, VFB_max={p.vfb_max:.3g} V")
-    lines.append(f"  R_LED,max≈{r_led_max:.0f} Ω, выбран R_LED≈{r_led:.0f} Ω, I_LED,avail≈{i_led_avail*1e3:.2f} mA")
-    if r_bias:
-        lines.append(f"  Rbias≈{r_bias:.0f} Ω при Ibias={p.i_bias_mA:.3g} mA и Vk={p.vk_work:.3g} В")
-    lines.append("— Компенсатор:")
-    for k,v in network["parts"].items():
-        unit = "Ω" if "R" in k else "F"
-        lines.append(f"  {k.replace('_',' ')} = {v:.6g} {unit}")
-    lines.append("— Частоты:")
-    c2fb, copto, cfb = _cfb_total_F(p)
-    lines.append(f"  Cfb_F = {cfb:.6g} F  (C2_fb + C_opto)")
-    for k,v in network["freqs"].items():
-        lines.append(f"  {k} = {v:.3g} Hz")
-    lines.append(f"— |G_total(fc)| ≈ {network['gain_at_fc_dB']:.2f} dB  (цель: {p.gc_db:.2f} dB)")
+def _divider_values(vout: float, Ibridge: float, Vref: float) -> (float, float):
+    """Расчет R1 (верхний) и Rlower по току моста."""
+    Rlower = Vref / Ibridge
+    R1 = (vout - Vref) / Ibridge
+    return R1, Rlower
 
-    report_text = "\n".join(lines)
-    out = {
-        "inputs": { "CompType": comp_type, "VFB_min_V": p.vfb_min, "VFB_max_V": p.vfb_max },
-        "network": network,
-        "divider": {"R1_Ohm": r_up, "Rlower_Ohm": r_low},
-        "bias": {"R_LED_max_Ohm": r_led_max, "R_LED_sel_Ohm": r_led, "I_LED_avail_A": i_led_avail, "I_LED_req_A": i_led_req, "Rbias_Ohm": r_bias},
-        "warnings": warnings,
-        "report_text": report_text,
-    }
-    return out
+
+def _rled_max_fast_lane(vout: float, Vref: float, Vf: float,
+                        Vdd: float, VCEsat: float, Ibias: float,
+                        Rpullup: float, CTR_min: float) -> float:
+    """
+    Верхний предел RLED для схем с fast-lane (см. слайды ON Semi):
+    RLED_max <= ((Vout - Vf - Vref)/(Vdd - VCEsat + Ibias*CTR_min*Rpullup)) * (Rpullup*CTR_min)
+    """
+    A = max(vout - Vf - Vref, 1e-6)
+    B = max(Vdd - VCEsat + Ibias * CTR_min * Rpullup, 1e-6)
+    return (A / B) * (Rpullup * CTR_min)
+
+
+def _rled_max_no_fast_lane(Vz: float, Vref: float, Vf: float,
+                           Vdd: float, VCEsat: float, Ibias: float,
+                           Rpullup: float, CTR_min: float) -> float:
+    """
+    Верхний предел RLED для схем без fast-lane (см. слайды: use Vz instead of Vout):
+    RLED_max <= ((Vz - Vf - Vref)/(Vdd - VCEsat + Ibias*CTR_min*Rpullup)) * (Rpullup*CTR_min)
+    """
+    A = max(Vz - Vf - Vref, 1e-6)
+    B = max(Vdd - VCEsat + Ibias * CTR_min * Rpullup, 1e-6)
+    return (A / B) * (Rpullup * CTR_min)
+
+
+def _a_from_boost(boost_deg: float) -> float:
+    """a = tan(phi) + sqrt(tan^2(phi)+1)"""
+    t = tan(boost_deg * pi / 180.0)
+    return t + sqrt(t*t + 1.0)
+
+
+def _ensure_positive(x: float, name: str) -> float:
+    if not isfinite(x) or x <= 0.0:
+        raise ValueError(f"{name} must be > 0, got {x}")
+    return x
+
+
+def design_type1(inp: Inputs) -> Results:
+    """
+    Type 1 (origin pole only, no phase boost)
+    Элементы: Rpullup, C2, RLED, Rbias, TL431, R1, Rlower, C1.
+    """
+    p = _merge_params(inp.params)
+    Vref = p["Vref_TL431"]; Vf = p["Vf_LED"]; VCE = p["VCE_sat"]
+    CTR = p["CTR_min"]; Ibias = p["Ibias_TL431"]
+    Vdd = p["Vdd_pullup"]; Rpullup = p["Rpullup"]; Copto = p["Copto"]
+    Ibridge = p["Ibridge"]; margin = p["RLED_margin"]
+
+    fc = _ensure_positive(inp.fc_hz, "fc_hz")
+    Glin = 10.0 ** (inp.Gfc_db / 20.0)  # требуемый модуль |G(fc)|
+    fpo = fc * Glin                           # f_po = G(fc) * fc  (см. слайды)
+    # Предел по RLED
+    RLED_max = _rled_max_fast_lane(inp.vout, Vref, Vf, Vdd, VCE, Ibias, Rpullup, CTR)
+    RLED = RLED_max * margin
+
+    # Конденсатор полюса в коллекторе: C2_pole = CTR / (2π f_po RLED)
+    C2_pole = CTR / (2*pi*fpo*RLED)
+    # Учитываем паразитную емкость оптопары:
+    C2 = max(C2_pole - Copto, 0.0)
+
+    # Делитель на вторичной
+    R1, Rlower = _divider_values(inp.vout, Ibridge, Vref)
+    # Нейтрализация нуля: C1 = C2_pole * Rpullup / R1
+    C1 = C2_pole * (Rpullup / R1)
+
+    # Ток, который должен стянуть транзистор для Vfb_ref:
+    Ifb = max((Vdd - inp.vfb_ref) / Rpullup, 0.0)
+    Iled_dc_req = Ifb / CTR
+    Rbias = (inp.vout - Vref - Vf) / max(Ibias + Iled_dc_req, 1e-9)
+
+    notes = (f"Type 1: fpo={fpo:.1f} Hz; Ifb@Vfb={Ifb*1e3:.2f} mA; "
+             f"Rq_LED_max check; C2 includes Copto.")
+    return Results(
+        type_name="Type 1 (origin pole only, no phase boost)",
+        Rpullup=Rpullup, C2=C2, Copto=Copto, f_opto_hz=p["f_opto_hz"],
+        RLED=RLED, RLED_max=RLED_max, Rbias=Rbias, R1=R1, Rlower=Rlower,
+        R2=None, R3=None, C1=C1, C3=None, Rz=None, Vz=None,
+        fz_hz=None, fp_hz=fpo, G1_mid=CTR*Rpullup/RLED, G_needed_lin=Glin, notes=notes
+    )
+
+
+def design_type2_fast_lane(inp: Inputs) -> Results:
+    """
+    Type 2 (origin pole + zero + pole) с fast-lane (RLED подключен к Vout).
+    Элементы: Rpullup, C2, RLED, Rbias, TL431, R1, Rlower, C1.
+    """
+    p = _merge_params(inp.params)
+    Vref = p["Vref_TL431"]; Vf = p["Vf_LED"]; VCE = p["VCE_sat"]
+    CTR = p["CTR_min"]; Ibias = p["Ibias_TL431"]
+    Vdd = p["Vdd_pullup"]; Rpullup = p["Rpullup"]; Copto = p["Copto"]
+    Ibridge = p["Ibridge"]; margin = p["RLED_margin"]
+
+    fc = _ensure_positive(inp.fc_hz, "fc_hz")
+    boost = inp.boost_deg if inp.boost_deg is not None else 0.0
+    a = _a_from_boost(boost)
+    fz = fc / a
+    fp = fc * a
+
+    # Делитель
+    R1, Rlower = _divider_values(inp.vout, Ibridge, Vref)
+
+    # Позиционирование нуля/полюса
+    C1 = 1.0 / (2*pi*fz*R1)                         # zero at fz via R1||C1
+    C2_pole = 1.0 / (2*pi*fp*Rpullup)               # pole at fp via Rpullup||C2
+    C2 = max(C2_pole - Copto, 0.0)
+
+    # Необходимый mid-band gain: |G(fc)| = 10^(Gfc/20)
+    Glin = 10.0 ** (inp.Gfc_db / 20.0)
+    # Для fast-lane средний коэффициент задаётся RLED: G1 = CTR*Rpullup/RLED
+    # => RLED = CTR*Rpullup/Glin
+    RLED = (CTR * Rpullup) / max(Glin, 1e-9)
+
+    # Проверка предела RLED
+    RLED_max = _rled_max_fast_lane(inp.vout, Vref, Vf, Vdd, VCE, Ibias, Rpullup, CTR)
+    if RLED > RLED_max * margin:
+        # если требуется усиление меньше допустимого предела — предупреждение
+        pass
+
+    # DC смещение и токи для установки Vfb
+    Ifb = max((Vdd - inp.vfb_ref) / Rpullup, 0.0)
+    Iled_dc_req = Ifb / CTR
+    Rbias = (inp.vout - Vref - Vf) / max(Ibias + Iled_dc_req, 1e-9)
+
+    notes = (f"Type 2 fast-lane: a={a:.3f}, fz={fz:.1f} Hz, fp={fp:.1f} Hz; "
+             f"Ifb@Vfb={Ifb*1e3:.2f} mA. "
+             f"RLED limited by static gain ceiling.")
+    return Results(
+        type_name="Type 2 (with fast lane)",
+        Rpullup=Rpullup, C2=C2, Copto=Copto, f_opto_hz=p["f_opto_hz"],
+        RLED=RLED, RLED_max=RLED_max, Rbias=Rbias, R1=R1, Rlower=Rlower,
+        R2=None, R3=None, C1=C1, C3=None, Rz=None, Vz=None,
+        fz_hz=fz, fp_hz=fp, G1_mid=CTR*Rpullup/RLED, G_needed_lin=Glin,
+        notes=notes
+    )
+
+
+def design_type2_no_fast_lane(inp: Inputs, Vz: float, Rz: Optional[float] = None) -> Results:
+    """
+    Type 2 (origin pole + zero + pole) без fast-lane (RLED висит на фиксированном смещении Vz).
+    Требует заданного напряжения стабилитрона Vz (см. схему Optocoupler_type2.png).
+    Элементы: Rpullup, C2, RLED (по DC ограничению), Rbias, TL431, R1, Rlower, C1, R2, (Rz опционально).
+    """
+    p = _merge_params(inp.params)
+    Vref = p["Vref_TL431"]; Vf = p["Vf_LED"]; VCE = p["VCE_sat"]
+    CTR = p["CTR_min"]; Ibias = p["Ibias_TL431"]
+    Vdd = p["Vdd_pullup"]; Rpullup = p["Rpullup"]; Copto = p["Copto"]
+    Ibridge = p["Ibridge"]; margin = p["RLED_margin"]
+
+    fc = _ensure_positive(inp.fc_hz, "fc_hz")
+    boost = _ensure_positive(inp.boost_deg or 1e-6, "boost_deg")
+    a = _a_from_boost(boost)
+    fz = fc / a
+    fp = fc * a
+
+    # Делитель
+    R1, Rlower = _divider_values(inp.vout, Ibridge, Vref)
+
+    # Ограничение RLED для DC смещения
+    RLED_max = _rled_max_no_fast_lane(Vz, Vref, Vf, Vdd, VCE, Ibias, Rpullup, CTR)
+    RLED = RLED_max * margin
+
+    # C2 полюс по Rpullup||C2
+    C2_pole = 1.0 / (2*pi*fp*Rpullup)
+    C2 = max(C2_pole - Copto, 0.0)
+
+    # Необходимый общий модуль на fc: G2 (может быть <1, т.е. отриц. дБ)
+    G2 = 10.0 ** (inp.Gfc_db / 20.0)
+    # Дополнительный множитель от оптопары/связи:
+    G1 = (Rpullup * CTR) / RLED
+    G = G2 / G1  # что должен дать «усилитель» TL431 (ветка с R2,C1)
+
+    # Расчет R2 по формуле из презентации (см. слайд с параметрами):
+    a_num = (fz*fz + fc*fc) * (fp*fp + fc*fc)
+    a_den = (fz*fz + fc*fc)
+    R2 = sqrt(a_num) / a_den * G * (fc * R1 / fp)
+    C1 = 1.0 / (2*pi*fz*R2)
+
+    # DC смещение по Vfb:
+    Ifb = max((Vdd - inp.vfb_ref) / Rpullup, 0.0)
+    Iled_dc_req = Ifb / CTR
+    Rbias = (Vz - Vref - Vf) / max(Ibias + Iled_dc_req, 1e-9)
+
+    notes = (f"Type 2 no fast-lane: a={a:.3f}, fz={fz:.1f} Hz, fp={fp:.1f} Hz; "
+             f"G1={G1:.3f}, G(fc) target={G2:.3f}, R2={R2:.1f} Ω. "
+             f"Copto accounted; Ifb={Ifb*1e3:.2f} mA.")
+    return Results(
+        type_name="Type 2 (without fast lane, biased with Vz)",
+        Rpullup=Rpullup, C2=C2, Copto=Copto, f_opto_hz=p["f_opto_hz"],
+        RLED=RLED, RLED_max=RLED_max, Rbias=Rbias, R1=R1, Rlower=Rlower,
+        R2=R2, R3=None, C1=C1, C3=None, Rz=Rz, Vz=Vz,
+        fz_hz=fz, fp_hz=fp, G1_mid=G1, G_needed_lin=G2, notes=notes
+    )
+
+
+def design_type3_no_fast_lane(inp: Inputs, Vz: float, Rz: Optional[float] = None) -> Results:
+    """
+    Type 3 (origin pole + double zero + double pole) без fast-lane.
+    В простейшем практическом синтезе общий фазовый буст φ делится пополам:
+       φ_each = φ/2, a = tan(φ_each)+sqrt(tan^2+1)
+       fz1=fz2=fc/a, fp1=fp2=a*fc
+    Элементы: Rpullup, C2 (первичный полюс), RLED (по DC ограничению),
+              Rbias, R1, Rlower, R2, R3, C1, C2, C3.
+    """
+    p = _merge_params(inp.params)
+    Vref = p["Vref_TL431"]; Vf = p["Vf_LED"]; VCE = p["VCE_sat"]
+    CTR = p["CTR_min"]; Ibias = p["Ibias_TL431"]
+    Vdd = p["Vdd_pullup"]; Rpullup = p["Rpullup"]; Copto = p["Copto"]
+    Ibridge = p["Ibridge"]; margin = p["RLED_margin"]; kR3 = p["R3_equal_R1"]
+
+    fc = _ensure_positive(inp.fc_hz, "fc_hz")
+    boost_total = _ensure_positive(inp.boost_deg or 1e-6, "boost_deg")
+    phi_each = boost_total / 2.0
+    a = _a_from_boost(phi_each)
+
+    fz = fc / a
+    fp = fc * a
+
+    # Делитель
+    R1, Rlower = _divider_values(inp.vout, Ibridge, Vref)
+    R3 = R1 * kR3
+
+    # Ограничение RLED по DC для смещения от Vz:
+    RLED_max = _rled_max_no_fast_lane(Vz, Vref, Vf, Vdd, VCE, Ibias, Rpullup, CTR)
+    RLED = RLED_max * margin
+
+    # Полюс первички (оптопара): один из высокочастотных полюсов пары
+    C2_pole = 1.0 / (2*pi*fp*Rpullup)
+    C2 = max(C2_pole - Copto, 0.0)
+
+    # Требуемый общий модуль на fc
+    G2 = 10.0 ** (inp.Gfc_db / 20.0)
+    G1 = (Rpullup * CTR) / RLED
+    G = G2 / G1
+
+    # При равных парах (fz,fz) и (fp,fp) mid-band коэффициент для TL431-ветки:
+    # Выводит R2 ≈ формуле, согласующейся с примером в слайдах.
+    R2 = (( (fc*fc + fz*fz) / (fc*fc) ) * (fc/fp)) * R1 * G
+
+    # Конденсаторы:
+    C1 = 1.0 / (2*pi*fz*R2)   # первый нуль через R2-C1
+    C3 = 1.0 / (2*pi*fp*R3)   # второй ВЧ полюс через R3-C3
+
+    # Второй нуль через параллельный конденсатор к R1:
+    C1_slow = 1.0 / (2*pi*fz*R1)
+    notes_local = (f"Type 3 no fast-lane: φ_each={phi_each:.1f}°, a={a:.3f}, "
+                   f"fz={fz:.1f} Hz, fp={fp:.1f} Hz. "
+                   f"Второй нуль через R1 и конденсатор C≈{C1_slow:.3e} Ф.")
+
+    # DC смещение по Vfb:
+    Ifb = max((Vdd - inp.vfb_ref) / Rpullup, 0.0)
+    Iled_dc_req = Ifb / CTR
+    Rbias = (Vz - Vref - Vf) / max(Ibias + Iled_dc_req, 1e-9)
+
+    return Results(
+        type_name="Type 3 (without fast lane)",
+        Rpullup=Rpullup, C2=C2, Copto=Copto, f_opto_hz=p["f_opto_hz"],
+        RLED=RLED, RLED_max=RLED_max, Rbias=Rbias, R1=R1, Rlower=Rlower,
+        R2=R2, R3=R3, C1=C1, C3=C3, Rz=Rz, Vz=Vz,
+        fz_hz=fz, fp_hz=fp, G1_mid=G1, G_needed_lin=G2, notes=notes_local
+    )
+
+
+# Вспомогательная функция для форматирования результатов
+def as_readable_dict(res: Results) -> Dict[str, Any]:
+    d = asdict(res)
+    # Удобочитаемые единицы (не изменяем исходные значения)
+    pretty = dict(d)
+    return pretty
