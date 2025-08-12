@@ -67,7 +67,7 @@ Rpullup, C2, RLED, Rbias, TL431, R1, R2, R3, C1, C2, C3, Rlower, Rz, Vz, etc.
 
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-from math import pi, tan, sqrt, isfinite
+from math import pi, tan, sqrt, isfinite, atan
 from typing import Optional, Dict, Any
 
 
@@ -180,6 +180,14 @@ def _a_from_boost(boost_deg: float) -> float:
     """a = tan(phi) + sqrt(tan^2(phi)+1)"""
     t = tan(boost_deg * pi / 180.0)
     return t + sqrt(t*t + 1.0)
+
+
+def _boost_from_ratio(fc: float, fz: float) -> float:
+    """Inverse of :func:`_a_from_boost` using frequency ratio fc/fz."""
+    if fz <= 0 or fc <= 0:
+        return 0.0
+    a = fc / fz
+    return atan((a*a - 1.0) / (2.0 * a)) * 180.0 / pi
 
 
 def _ensure_positive(x: float, name: str) -> float:
@@ -419,3 +427,106 @@ def as_readable_dict(res: Results) -> Dict[str, Any]:
     # Удобочитаемые единицы (не изменяем исходные значения)
     pretty = dict(d)
     return pretty
+
+
+# --- Compatibility layer for legacy GUI ---
+
+
+@dataclass
+class InputParams:
+    """Parameters used by the legacy GUI optocoupler tool.
+
+    The new synthesis functions operate on :class:`Inputs` instances, but the
+    GUI expects an ``InputParams`` dataclass with a large number of fields.  To
+    keep the GUI working we provide this lightweight compatibility layer which
+    converts the old structure into the new one and delegates the actual
+    calculations to :func:`design_type1`, :func:`design_type2_fast_lane`,
+    :func:`design_type2_no_fast_lane` and :func:`design_type3_no_fast_lane`.
+    Many of the fields are currently unused by the calculations but are kept so
+    that existing code can construct the dataclass without errors.
+    """
+
+    v_out: float
+    f_sw: float
+    vdd: float
+    r_pullup: float
+    ctr_min: float
+    c2_fb_nf: float
+    c_opto_nf: float
+    v_ref: float
+    v_f_led: float
+    vce_sat: float
+    i_div_uA: float
+    v_bias_zener: float
+    i_bias_mA: float
+    fc: float
+    gc_db: float
+    fz1: float
+    fz2: float
+    fp3: float
+    c1_nf: float
+    c2_nf: float
+    c3_nf: float
+    fp2: float
+    vk_work: float
+    vfb_min: float
+    vfb_max: float
+    opto_model: str = ""
+    comp_type: str = "type3"
+
+
+def compute_optocoupler(p: InputParams) -> Dict[str, Any]:
+    """Return a simple text report for the optocoupler network.
+
+    This is a thin wrapper that maps the GUI's ``InputParams`` to the new
+    calculation routines.  Only a subset of parameters is used; unused values
+    are kept for backwards compatibility.
+    """
+
+    # Prepare parameter overrides for the design routines
+    user = {
+        "Vref_TL431": p.v_ref,
+        "Vf_LED": p.v_f_led,
+        "VCE_sat": p.vce_sat,
+        "CTR_min": p.ctr_min,
+        "Ibias_TL431": p.i_bias_mA * 1e-3,
+        "Vdd_pullup": p.vdd,
+        "Rpullup": p.r_pullup,
+        "Copto": p.c_opto_nf * 1e-9,
+        "Ibridge": p.i_div_uA * 1e-6,
+    }
+
+    inp = Inputs(
+        fc_hz=p.fc,
+        Gfc_db=p.gc_db,
+        boost_deg=None,
+        vout=p.v_out,
+        fsw_hz=p.f_sw,
+        vfb_ref=p.vk_work,
+        params=user,
+    )
+
+    t = (p.comp_type or "type3").lower()
+    if t == "type1":
+        res = design_type1(inp)
+    elif t == "type2_fast":
+        inp.boost_deg = _boost_from_ratio(p.fc, p.fz1)
+        res = design_type2_fast_lane(inp)
+    elif t == "type2":
+        inp.boost_deg = _boost_from_ratio(p.fc, p.fz1)
+        res = design_type2_no_fast_lane(inp, p.v_bias_zener)
+    else:  # default to type3
+        inp.boost_deg = _boost_from_ratio(p.fc, p.fz1) * 2.0
+        res = design_type3_no_fast_lane(inp, p.v_bias_zener)
+
+    # Build a simple human‑readable report
+    lines = [f"Type: {res.type_name}", "", "[Network]"]
+    for key in ["Rpullup", "C2", "RLED", "Rbias", "R1", "Rlower", "R2", "R3", "C1", "C3"]:
+        val = getattr(res, key, None)
+        if val is not None:
+            lines.append(f"{key:7s} = {val:.6g}")
+    if res.notes:
+        lines.append("")
+        lines.append(res.notes)
+
+    return {"report_text": "\n".join(lines)}
