@@ -434,53 +434,42 @@ def as_readable_dict(res: Results) -> Dict[str, Any]:
 
 @dataclass
 class InputParams:
-    """Parameters used by the legacy GUI optocoupler tool.
+    """Minimal set of parameters required by the GUI wrapper.
 
-    The new synthesis functions operate on :class:`Inputs` instances, but the
-    GUI expects an ``InputParams`` dataclass with a large number of fields.  To
-    keep the GUI working we provide this lightweight compatibility layer which
-    converts the old structure into the new one and delegates the actual
-    calculations to :func:`design_type1`, :func:`design_type2_fast_lane`,
-    :func:`design_type2_no_fast_lane` and :func:`design_type3_no_fast_lane`.
-    Many of the fields are currently unused by the calculations but are kept so
-    that existing code can construct the dataclass without errors.
+    The original application expected a very large ``InputParams`` structure
+    mirroring the legacy tool.  To simplify the user interface we now expose
+    only the values that are actually used by :mod:`optocoupler_design`.
+    Defaults correspond to the ``DEFAULTS`` dictionary defined above so that
+    the GUI may omit fields which the user does not wish to override.
     """
 
     v_out: float
     f_sw: float
-    vdd: float
-    r_pullup: float
-    ctr_min: float
-    c2_fb_nf: float
-    c_opto_nf: float
-    v_ref: float
-    v_f_led: float
-    vce_sat: float
-    i_div_uA: float
-    v_bias_zener: float
-    i_bias_mA: float
-    fc: float
-    gc_db: float
-    fz1: float
-    fz2: float
-    fp3: float
-    c1_nf: float
-    c2_nf: float
-    c3_nf: float
-    fp2: float
-    vk_work: float
-    vfb_min: float
-    vfb_max: float
-    opto_model: str = ""
+    # Device and technology parameters -------------------------------------
+    vdd: float = 5.0
+    r_pullup: float = 20e3
+    ctr_min: float = 0.3
+    c_opto_nf: float = 2.0
+    v_ref: float = 2.5
+    v_f_led: float = 1.0
+    vce_sat: float = 0.3
+    i_div_uA: float = 250.0
+    v_bias_zener: float = 6.2
+    i_bias_mA: float = 1.0
+    vk_work: float = 2.5
+    # Loop shaping parameters ----------------------------------------------
+    fc: float = 1000.0
+    gc_db: float = -10.0
+    boost_deg: float = 0.0
     comp_type: str = "type3"
 
 
 def compute_optocoupler(p: InputParams) -> Dict[str, Any]:
     """Return a simple text report for the optocoupler network.
 
-    This is a thin wrapper that maps the GUI's ``InputParams`` to the new
-    calculation routines.  Only a subset of parameters is used; unused values
-    are kept for backwards compatibility.
+    ``InputParams`` values are mapped to :class:`Inputs` and the appropriate
+    design helper from this module.  Only a handful of parameters are required
+    which keeps the GUI interface compact.
     """
 
     # Prepare parameter overrides for the design routines
@@ -499,7 +488,7 @@ def compute_optocoupler(p: InputParams) -> Dict[str, Any]:
     inp = Inputs(
         fc_hz=p.fc,
         Gfc_db=p.gc_db,
-        boost_deg=None,
+        boost_deg=p.boost_deg if p.comp_type != "type1" else None,
         vout=p.v_out,
         fsw_hz=p.f_sw,
         vfb_ref=p.vk_work,
@@ -510,13 +499,10 @@ def compute_optocoupler(p: InputParams) -> Dict[str, Any]:
     if t == "type1":
         res = design_type1(inp)
     elif t == "type2_fast":
-        inp.boost_deg = _boost_from_ratio(p.fc, p.fz1)
         res = design_type2_fast_lane(inp)
     elif t == "type2":
-        inp.boost_deg = _boost_from_ratio(p.fc, p.fz1)
         res = design_type2_no_fast_lane(inp, p.v_bias_zener)
     else:  # default to type3
-        inp.boost_deg = _boost_from_ratio(p.fc, p.fz1) * 2.0
         res = design_type3_no_fast_lane(inp, p.v_bias_zener)
 
     # Build a simple human‑readable report
