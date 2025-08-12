@@ -1004,6 +1004,7 @@ class App(tk.Tk):
         add_row(left, r, "Vbias (zener), V", "v_bias_zener", "Стабилитрон узла смещения LED"); r+=1
         add_row(left, r, "Ibias TL431, mA", "i_bias_mA", "Доп. ток смещения TL431 через Rbias"); r+=1
         add_row(left, r, "Vk work, V", "vk_work", "Рабочая точка катода TL431"); r+=1
+        add_row(left, r, "Vfb ref, V", "vfb", "Порог компаратора FB контроллера"); r+=1
         ttk.Separator(left, orient="horizontal").grid(row=r, column=0, columnspan=2, sticky="ew", pady=4); r+=1
         add_row(left, r, "fc, Hz", "fc", "Желаемая частота пересечения петли"); r+=1
         add_row(left, r, "Gc(fc), dB", "gc_db", "Модуль компенсатор+опто в fc"); r+=1
@@ -1197,11 +1198,12 @@ class App(tk.Tk):
     def on_comp_type_changed(self, event=None):
         t = self.opto_vars["comp_type"].get().strip().lower()
         visible = {"v_out","f_sw","vdd","r_pullup","ctr_min","c_opto_nf",
-                   "v_ref","v_f_led","vce_sat","i_div_uA","fc","gc_db"}
+                   "v_ref","v_f_led","vce_sat","i_div_uA","i_bias_mA",
+                   "vfb","fc","gc_db"}
         if t != "type1":
             visible.add("boost_deg")
         if t in {"type2", "type3"}:
-            visible.update({"v_bias_zener","i_bias_mA","vk_work"})
+            visible.update({"v_bias_zener","vk_work"})
         for key, frm in self.opto_field_frames.items():
             frm.grid() if key in visible else frm.grid_remove()
         img_name = {"type1":"Optocoupler_type1.png","type2":"Optocoupler_type2.png",
