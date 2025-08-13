@@ -792,6 +792,8 @@ class App(tk.Tk):
             try:
                 self.topology_image = tk.PhotoImage(file=path)
                 self.topology_image_label.configure(image=self.topology_image)
+                if hasattr(self, "res_topology_image_label"):
+                    self.res_topology_image_label.configure(image=self.topology_image)
             except Exception:
                 pass
     def build_outputs_tab(self):
@@ -935,6 +937,7 @@ class App(tk.Tk):
         self.k_result.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
         self.k_result.grid(row=0, column=0, sticky="nsew")
         add_copy_menu(self.k_result)
+        self.k_result.bind("<Double-Button-1>", self.on_k_result_double_click)
         ysb.grid(row=0, column=1, sticky="ns")
         xsb.grid(row=1, column=0, sticky="ew")
         result_frame.columnconfigure(0, weight=1)
@@ -944,8 +947,10 @@ class App(tk.Tk):
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
         ttk.Button(top, text="Compute", command=self.compute, style="Accent.TButton").pack(side="left", padx=4)
         ttk.Button(top, text="Save report...", command=self.save_report, style="Accent.TButton").pack(side="left", padx=4)
-        text_frame = ttk.Frame(tab)
-        text_frame.pack(fill="both", expand=True)
+        content = ttk.Frame(tab)
+        content.pack(fill="both", expand=True)
+        text_frame = ttk.Frame(content)
+        text_frame.pack(side="left", fill="both", expand=True)
         self.res_text = tk.Text(text_frame, wrap="none", font=("Consolas", 10))
         ysb = ttk.Scrollbar(text_frame, orient="vertical", command=self.res_text.yview)
         xsb = ttk.Scrollbar(text_frame, orient="horizontal", command=self.res_text.xview)
@@ -956,6 +961,11 @@ class App(tk.Tk):
         xsb.grid(row=1, column=0, sticky="ew")
         text_frame.columnconfigure(0, weight=1)
         text_frame.rowconfigure(0, weight=1)
+        img_frame = ttk.Frame(content, padding=10); img_frame.pack(side="right", fill="y")
+        self.res_topology_image_label = ttk.Label(img_frame)
+        self.res_topology_image_label.pack()
+        if hasattr(self, "topology_image"):
+            self.res_topology_image_label.configure(image=self.topology_image)
         # Preload defaults from current model
         try:
             self.load_opto_defaults()
@@ -1295,6 +1305,19 @@ class App(tk.Tk):
             messagebox.showinfo("K-optimizer", "Selected topology is not yet implemented")
         except Exception as e:
             messagebox.showerror("K-optimizer", str(e))
+
+    def on_k_result_double_click(self, event):
+        if not hasattr(self, "sweep_cache"):
+            return
+        idx = self.k_result.index(f"@{event.x},{event.y}")
+        line = int(idx.split(".")[0])
+        row_idx = line - 3  # skip criterion and header
+        rows = self.sweep_cache.get("grid", [])
+        if 0 <= row_idx < len(rows):
+            Dval = rows[row_idx]["D"]
+            self.inputs_vars["duty_max"].set(f"{Dval:.4f}")
+            messagebox.showinfo("K-optimizer", f"Применено: D(Vin_min)={Dval:.3f}. Пересчитайте (Compute).")
+
     def apply_best(self):
         if not hasattr(self, "sweep_cache"):
             messagebox.showinfo("K-optimizer", "Run sweep first."); return
