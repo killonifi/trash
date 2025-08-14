@@ -984,14 +984,23 @@ class App(tk.Tk):
         # Left pane with inputs (scrollable)
         left_container = ttk.Frame(body)
         left_container.pack(side="left", fill="y")
-        left_canvas = tk.Canvas(left_container, highlightthickness=0)
+        left_canvas = tk.Canvas(left_container, highlightthickness=0, width=720)
         yscroll = ttk.Scrollbar(left_container, orient="vertical", command=left_canvas.yview)
         left_canvas.configure(yscrollcommand=yscroll.set)
-        yscroll.pack(side="right", fill="y")
         left_canvas.pack(side="left", fill="y")
         left = ttk.Frame(left_canvas, padding=6)
         left_canvas.create_window((0,0), window=left, anchor="nw")
-        left.bind("<Configure>", lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
+
+        def _update_scroll(_=None):
+            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+            bbox = left_canvas.bbox("all")
+            if bbox and bbox[3] > left_canvas.winfo_height():
+                yscroll.pack(side="right", fill="y")
+            else:
+                yscroll.pack_forget()
+
+        left.bind("<Configure>", _update_scroll)
+        left_canvas.bind("<Configure>", _update_scroll)
         left_canvas.bind("<MouseWheel>", lambda e: left_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         self.opto_vars = {k: tk.StringVar() for k in [
             "v_out","f_sw","vdd","r_pullup","ctr_min","c_opto_nf","v_ref",
@@ -1190,6 +1199,7 @@ class App(tk.Tk):
         except Exception:
             pass
         self.on_comp_type_changed()
+        _update_scroll()
 
     def load_opto_defaults(self):
         # Take defaults from the normalized configuration (Inputs/Outputs)
