@@ -239,6 +239,9 @@ class RefinedDesign:
     core_loss_W: Optional[float]
     losses: Dict[str, Any]
     notes: Dict[str, Any]
+    lsec_each_H: Dict[str, float]
+    rhpz_each_Hz: Dict[str, float]
+    lc_pole_each_Hz: Dict[str, float]
 
 # ----- computations -----
 
