@@ -562,11 +562,8 @@ class App(tk.Tk):
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure("TButton", padding=6, relief="flat")
-        style.configure("Accent.TButton", padding=6, foreground="white", background="#0078D7", relief="flat")
-        style.map("Accent.TButton", background=[("active", "#005A9E")])
-        style.configure("Chat.TButton", padding=6, foreground="white", background="#1E90FF", relief="flat")
-        style.map("Chat.TButton", background=[("active", "#1C86EE")])
+        style.configure("TButton", padding=6, foreground="white", background="#0078D7", relief="flat")
+        style.map("TButton", background=[("active", "#005A9E")])
         style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
         style.configure("Info.TLabel", foreground="#0078D7")
         self.option_add("*Font", "{Segoe UI} 10")
@@ -580,8 +577,8 @@ class App(tk.Tk):
         topo_cb.bind("<<ComboboxSelected>>", self.change_topology)
         center = ttk.Frame(topbar)
         center.pack(side="left", expand=True, fill="x")
-        ttk.Button(center, text="ChatGPT", command=self.open_chat, style="Chat.TButton").pack()
-        ttk.Button(topbar, text="Compute", command=self.compute, style="Accent.TButton").pack(side="right", padx=4)
+        ttk.Button(center, text="ChatGPT", command=self.open_chat).pack()
+        ttk.Button(topbar, text="Compute", command=self.compute).pack(side="right", padx=4)
         self.design_cls = DESIGN_MAP[self.topology_var.get()]
         self.design = self.design_cls()
 
@@ -927,8 +924,8 @@ class App(tk.Tk):
         ttk.Label(grid, text="step").grid(row=1, column=4, sticky="w")
         ttk.Entry(grid, textvariable=self.k_vars["dstep"], width=8).grid(row=1, column=5, sticky="w")
         btns = ttk.Frame(tab, padding=8); btns.pack(fill="x")
-        ttk.Button(btns, text="Run sweep", command=self.run_sweep, style="Accent.TButton").pack(side="left", padx=5)
-        ttk.Button(btns, text="Apply best K", command=self.apply_best, style="Accent.TButton").pack(side="left", padx=5)
+        ttk.Button(btns, text="Run sweep", command=self.run_sweep).pack(side="left", padx=5)
+        ttk.Button(btns, text="Apply best K", command=self.apply_best).pack(side="left", padx=5)
         result_frame = ttk.Frame(tab, padding=8)
         result_frame.pack(fill="both", expand=True)
         self.k_result = tk.Text(result_frame, height=16, wrap="none", font=("Consolas", 10))
@@ -945,8 +942,8 @@ class App(tk.Tk):
     def build_results_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Results")
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
-        ttk.Button(top, text="Compute", command=self.compute, style="Accent.TButton").pack(side="left", padx=4)
-        ttk.Button(top, text="Save report...", command=self.save_report, style="Accent.TButton").pack(side="left", padx=4)
+        ttk.Button(top, text="Compute", command=self.compute).pack(side="left", padx=4)
+        ttk.Button(top, text="Save report...", command=self.save_report).pack(side="left", padx=4)
         content = ttk.Frame(tab)
         content.pack(fill="both", expand=True)
         text_frame = ttk.Frame(content)
@@ -984,13 +981,18 @@ class App(tk.Tk):
     def build_optocoupler_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Optocoupler")
         body = ttk.Frame(tab); body.pack(fill="both", expand=True)
-        # --- Toolbar on Optocoupler tab ---
-        tbar = ttk.Frame(tab, padding=(6,4)); tbar.pack(fill="x", side="top")
-        ttk.Button(tbar, text="Compute Optocoupler", command=lambda: self.compute_optocoupler()).pack(side="left", padx=(0,6))
-        ttk.Button(tbar, text="Run Auto-solver", command=self.run_opto_autosolver).pack(side="left")
-
-        # Left pane with inputs
-        left = ttk.Frame(body, padding=6); left.pack(side="left", fill="y")
+        # Left pane with inputs (scrollable)
+        left_container = ttk.Frame(body)
+        left_container.pack(side="left", fill="y")
+        left_canvas = tk.Canvas(left_container, highlightthickness=0)
+        yscroll = ttk.Scrollbar(left_container, orient="vertical", command=left_canvas.yview)
+        left_canvas.configure(yscrollcommand=yscroll.set)
+        yscroll.pack(side="right", fill="y")
+        left_canvas.pack(side="left", fill="y")
+        left = ttk.Frame(left_canvas, padding=6)
+        left_canvas.create_window((0,0), window=left, anchor="nw")
+        left.bind("<Configure>", lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
+        left_canvas.bind("<MouseWheel>", lambda e: left_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         self.opto_vars = {k: tk.StringVar() for k in [
             "v_out","f_sw","vdd","r_pullup","ctr_min","c_opto_nf","v_ref",
             "v_f_led","vce_sat","i_div_uA","v_bias_zener","i_bias_mA","vfb",
@@ -1086,12 +1088,8 @@ class App(tk.Tk):
         ttk.Label(solver, text="Zener Iz (A)").grid(row=3, column=0, sticky="w")
         z_frame = ttk.Frame(solver); z_frame.grid(row=3, column=1, sticky="ew")
         e_izmin = ttk.Entry(z_frame, textvariable=self.opto_vars["iz_min"], width=9); e_izmin.pack(side="left")
+        ttk.Label(z_frame, text="…").pack(side="left")
         e_izmax = ttk.Entry(z_frame, textvariable=self.opto_vars["iz_max"], width=9); e_izmax.pack(side="left")
-        # Run Auto-solver button
-        btn_autosolve = ttk.Button(solver, text="Run Auto‑solver now", command=self.run_opto_autosolver)
-        btn_autosolve.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(6,2))
-
-        e_izmin = ttk.Entry(z_frame, textvariable=self.opto_vars["iz_min"], width=9); e_izmin.pack(side="left"); ttk.Label(z_frame, text="…").pack(side="left"); e_izmax = ttk.Entry(z_frame, textvariable=self.opto_vars["iz_max"], width=9); e_izmax.pack(side="left")
         r += 1
 # --- Advanced (manual zeros/poles) ---
         adv = ttk.Labelframe(left, text="Advanced")
@@ -1138,7 +1136,8 @@ class App(tk.Tk):
         btns = ttk.Frame(left); btns.grid(row=r, column=0, columnspan=2, pady=6, sticky="w")
         ttk.Button(btns, text="Load defaults from model", command=self.load_opto_defaults).pack(side="left", padx=2)
         ttk.Button(btns, text="Open Optocoupler Library", command=lambda: OptoLibraryWindow(self, os.path.join(PACKAGE_DIR, "optocoupler_library.json"))).pack(side="left", padx=6)
-        ttk.Button(btns, text="Compute", command=self.compute_optocoupler, style="Accent.TButton").pack(side="left", padx=6)
+        ttk.Button(btns, text="Compute", command=self.compute_optocoupler, width=18).pack(side="left", padx=(6,3))
+        ttk.Button(btns, text="Run Auto-solver", command=self.run_opto_autosolver, width=18).pack(side="left", padx=(3,6))
 
         
         # Right: image + tabs
