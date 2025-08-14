@@ -969,16 +969,6 @@ class App(tk.Tk):
         except Exception:
             pass
 
-    def load_opto_defaults(self):
-        # Take defaults from the normalized configuration (Inputs/Outputs)
-        cfg = self.collect_cfg()
-        cfg_norm = self.design.normalize_cfg(cfg)
-        vout = cfg_norm["outputs"][0]["v"]
-        fsw = cfg_norm["input"]["fsw"]
-        self.opto_vars["v_out"].set(str(vout))
-        self.opto_vars["f_sw"].set(str(fsw))
-    
-    
     def _toggle_opto_manual(self, *_):
         """When 'Manual zeros/poles' is ON:
         - hide fc/G(fc)/Boost rows;
@@ -1004,7 +994,7 @@ class App(tk.Tk):
         # If manual is ON, ensure auto_tune is OFF for normal compute
         if manual and self.opto_vars.get("auto_tune").get() in ("1","True",True):
             self.opto_vars["auto_tune"].set("0")
-def build_optocoupler_tab(self):
+    def build_optocoupler_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Optocoupler")
         body = ttk.Frame(tab); body.pack(fill="both", expand=True)
         # Left pane with inputs (scrollable)
@@ -1235,7 +1225,7 @@ def build_optocoupler_tab(self):
         _update_scroll()
 
     def load_opto_defaults(self):
-        # Take defaults from the normalized configuration (Inputs/Outputs)
+        """Populate optocoupler defaults using the normalized configuration."""
         cfg = self.collect_cfg()
         cfg_norm = self.design.normalize_cfg(cfg)
         vout = cfg_norm["outputs"][0]["v"]
