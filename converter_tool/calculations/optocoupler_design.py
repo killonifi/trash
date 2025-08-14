@@ -605,7 +605,7 @@ class InputParams:
     manual_fp_hz: float = 0.0
     manual_fz2_hz: float = 0.0
     manual_fp2_hz: float = 0.0
-    # Autosolver controls
+    # Auto-tune controls
     auto_tune: bool = False
     r_min: float = 200.0
     r_max: float = 200e3

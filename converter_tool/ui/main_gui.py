@@ -972,7 +972,7 @@ class App(tk.Tk):
     def _toggle_opto_manual(self, *_):
         """When 'Manual zeros/poles' is ON:
         - hide fc/G(fc)/Boost rows;
-        - force auto_tune=0 for ordinary Compute (Run Auto-solver still temporarily enables it).
+        - force auto_tune=0 for ordinary Compute.
         When OFF: show fc/G/Boost back.
         """
         try:
@@ -1099,8 +1099,8 @@ class App(tk.Tk):
                         for key in ['fz','fp','fz2','fp2']: adv[key].configure(state='normal')
             return
         
-# --- Auto-solver ---
-        solver = ttk.Labelframe(left, text="Auto-solver")
+# --- Auto-tune ---
+        solver = ttk.Labelframe(left, text="Auto-tune")
         solver.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(6,4))
         solver.columnconfigure(1, weight=1)
         ttk.Checkbutton(solver, text="Enable auto-tune", variable=self.opto_vars["auto_tune"], onvalue="1", offvalue="0").grid(row=0, column=0, columnspan=2, sticky="w")
@@ -1169,7 +1169,6 @@ class App(tk.Tk):
         ttk.Button(btns, text="Load defaults from model", command=self.load_opto_defaults).pack(side="left", padx=2)
         ttk.Button(btns, text="Open Optocoupler Library", command=lambda: OptoLibraryWindow(self, os.path.join(PACKAGE_DIR, "optocoupler_library.json"))).pack(side="left", padx=6)
         ttk.Button(btns, text="Compute", command=self.compute_optocoupler, width=18).pack(side="left", padx=(6,3))
-        ttk.Button(btns, text="Run Auto-solver", command=self.run_opto_autosolver, width=18).pack(side="left", padx=(3,6))
 
         
         # Right: image + tabs
@@ -1393,18 +1392,6 @@ class App(tk.Tk):
         except Exception as e:
             self.opto_text.delete("1.0", "end")
             self.opto_text.insert("1.0", f"Error: {e}")
-    def run_opto_autosolver(self):
-        """Force one compute of the optocoupler with Auto‑tune ON.
-        Leaves the checkbox as‑is (uses current UI ranges)."""
-        prev = self.opto_vars.get("auto_tune").get()
-        try:
-            self.opto_vars["auto_tune"].set("0")
-            self.compute_optocoupler()
-        finally:
-            if prev not in ("1","True",True):
-                # Restore the previous state and recompute to reflect user's choice
-                self.opto_vars["auto_tune"].set(prev)
-                self.compute_optocoupler()
 
     def on_comp_type_changed(self, event=None):
         t = self.opto_vars["comp_type"].get().strip().lower()
