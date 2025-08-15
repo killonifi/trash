@@ -239,6 +239,9 @@ class RefinedDesign:
     core_loss_W: Optional[float]
     losses: Dict[str, Any]
     notes: Dict[str, Any]
+    lsec_each_H: Dict[str, float]
+    rhpz_each_Hz: Dict[str, float]
+    lc_pole_each_Hz: Dict[str, float]
 
 # ----- computations -----
 
@@ -468,6 +471,25 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
 
     notes = dict(np_min_from_Bmax=np_turns, period_s=period)
 
+    # --- Added: per-output secondary inductance and characteristic frequencies ---
+    lsec_each: Dict[str, float] = {}
+    rhpz_each: Dict[str, float] = {}
+    lc_pole_each: Dict[str, float] = {}
+    for o in outputs:
+        # Secondary inductance referred to this output
+        lsec_i = lm_actual * (ns_turns[o.name]/np_turns)**2
+        lsec_each[o.name] = lsec_i
+        # Nominal load resistance
+        Rload = (o.v + o.diode_drop) / max(o.i, 1e-12)
+        # CCM RHPZ estimate (used as a limit even if DCM)
+        rhpz_each[o.name] = (Rload * (1.0 - ini.d_vin_min)**2) / (2.0 * math.pi * max(lsec_i, 1e-18))
+        # LC pole with minimal recommended C_out
+        try:
+            C_out = ini.cout_min_each_F[o.name]
+        except Exception:
+            C_out = 0.0
+        lc_pole_each[o.name] = 1.0 / (2.0 * math.pi * math.sqrt(lsec_i*C_out)) if (lsec_i>0 and C_out>0) else 0.0
+
     return RefinedDesign(
         np_turns=np_turns, ns_turns=ns_turns, k_actual_np_over_ns_main=k_act,
         gap_m=gap, lm_actual_H=lm_actual, ipk_new_A=ipk, irms_pri_new_A=irms_pri,
@@ -476,7 +498,7 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
         diode_vrrm_ideal_each_V=diode_vrrm_ideal_each, diode_vrrm_required_each_V=diode_vrrm_required_each,
         fill_factor=fill_factor, ss0_core_cm4=ss0_core_cm4, ss0_min_cm4=ss0_min_cm4,
         rcd=rcd_info, core_loss_W=p_core_W, losses=losses, notes=notes
-    )
+    , lsec_each_H=lsec_each, rhpz_each_Hz=rhpz_each, lc_pole_each_Hz=lc_pole_each)
 
 def sweep_k(fin: FlybackInput, outputs: List[OutputSpec], geom: Geometry, core: CoreParameters,
             rcd: Optional[RCDClamp]=None, stein: Optional[Steinmetz]=None, mosfet: Optional[MosfetParams]=None,
