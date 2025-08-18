@@ -327,40 +327,40 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
             ns_turns[o.name] = max(1, int(round(np_turns / max(k_ideal, 1e-12))))
 
         k_act = np_turns / ns_turns[main_name]
-    # Compute gap/Lm with optional overrides
-    gap = None
-    lm_actual = None
-    if overrides:
-        try:
-            gap_in = overrides.get("gap_m")
-            al_in = overrides.get("al_nH_per_turn2")
-        except Exception:
-            gap_in = None; al_in = None
-        if gap_in:
+        # Compute gap/Lm with optional overrides
+        gap = None
+        lm_actual = None
+        if overrides:
             try:
-                gap = float(gap_in)
-                lm_actual = MU0 * (np_turns**2) * Ae / max(gap, 1e-18)
+                gap_in = overrides.get("gap_m")
+                al_in = overrides.get("al_nH_per_turn2")
             except Exception:
-                gap = None
-        if (lm_actual is None) and al_in:
-            try:
-                AL = float(al_in) * 1e-9  # H/turn^2
-                lm_actual = AL * (np_turns**2)
-                gap = MU0 * (np_turns**2) * Ae / max(lm_actual, 1e-18)
-            except Exception:
-                lm_actual = None
-    if (gap is None) or (lm_actual is None):
-        gap = MU0 * (np_turns**2) * Ae / max(ini.lm_target_H, 1e-18)
-        lm_actual = MU0 * (np_turns**2) * Ae / gap
-        ipk = (fin.vin_min * ini.d_vin_min) / (lm_actual * fin.fsw)
-        irms_pri = ipk * (ini.d_vin_min/3.0) ** 0.5
-        lsec_main = lm_actual * (ns_turns[main_name]/np_turns)**2
-        ipk_sec_main = ipk * k_act
-        toff = lsec_main * ipk_sec_main / (main.v + main.diode_drop)
-        dcm_ok = toff <= (1.0 - ini.d_vin_min) * period + 1e-15
-        if not force_dcm or dcm_ok or np_turns>1000:
-            break
-        np_turns += 1
+                gap_in = None; al_in = None
+            if gap_in:
+                try:
+                    gap = float(gap_in)
+                    lm_actual = MU0 * (np_turns**2) * Ae / max(gap, 1e-18)
+                except Exception:
+                    gap = None
+            if (lm_actual is None) and al_in:
+                try:
+                    AL = float(al_in) * 1e-9  # H/turn^2
+                    lm_actual = AL * (np_turns**2)
+                    gap = MU0 * (np_turns**2) * Ae / max(lm_actual, 1e-18)
+                except Exception:
+                    lm_actual = None
+        if (gap is None) or (lm_actual is None):
+            gap = MU0 * (np_turns**2) * Ae / max(ini.lm_target_H, 1e-18)
+            lm_actual = MU0 * (np_turns**2) * Ae / gap
+            ipk = (fin.vin_min * ini.d_vin_min) / (lm_actual * fin.fsw)
+            irms_pri = ipk * (ini.d_vin_min/3.0) ** 0.5
+            lsec_main = lm_actual * (ns_turns[main_name]/np_turns)**2
+            ipk_sec_main = ipk * k_act
+            toff = lsec_main * ipk_sec_main / (main.v + main.diode_drop)
+            dcm_ok = toff <= (1.0 - ini.d_vin_min) * period + 1e-15
+            if not force_dcm or dcm_ok or np_turns>1000:
+                break
+            np_turns += 1
 
     # Flux swing (ΔB)
     dB = (fin.vin_max * ini.d_vin_min) / (np_turns * Ae * fin.fsw)
