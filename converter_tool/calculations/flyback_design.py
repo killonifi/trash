@@ -320,76 +320,76 @@ def refine_with_core(fin: FlybackInput, geom: Geometry, core: CoreParameters,
     main = next(o for o in outputs if o.name == main_name)
 
     period = 1.0 / fin.fsw
-# Compute secondary turns (Ns) per output with possible overrides
-iter_guard = 0
-while True:
-    ns_turns: Dict[str,int] = {}
-    for o in outputs:
-        k_ideal = ini.per_output[o.name]["k_np_over_ns_ideal"]
-        val = max(1, int(round(np_turns / max(k_ideal, 1e-12))))
-        # Allow per-output Ns overrides from GUI
+    # Compute secondary turns (Ns) per output with possible overrides
+    iter_guard = 0
+    while True:
+        ns_turns: Dict[str,int] = {}
+        for o in outputs:
+            k_ideal = ini.per_output[o.name]["k_np_over_ns_ideal"]
+            val = max(1, int(round(np_turns / max(k_ideal, 1e-12))))
+            # Allow per-output Ns overrides from GUI
+            if overrides:
+                try:
+                    key = f"ns_turns__{o.name}"
+                    if key in overrides and str(overrides.get(key)).strip() != "":
+                        val = int(max(1, float(overrides.get(key))))
+                    elif o.name == main_name:
+                        tmp = overrides.get("ns_main_turns")
+                        if tmp is not None and str(tmp).strip() != "":
+                            val = int(max(1, float(tmp)))
+                except Exception:
+                    pass
+            ns_turns[o.name] = val
+    
+        k_act = np_turns / ns_turns[main_name]
+    
+        # Resolve Lm from overrides to approach Lm_target
+        gap = None
+        lm_actual = None
         if overrides:
             try:
-                key = f"ns_turns__{o.name}"
-                if key in overrides and str(overrides.get(key)).strip() != "":
-                    val = int(max(1, float(overrides.get(key))))
-                elif o.name == main_name:
-                    tmp = overrides.get("ns_main_turns")
-                    if tmp is not None and str(tmp).strip() != "":
-                        val = int(max(1, float(tmp)))
+                gap_in = overrides.get("gap_m")
+                al_in = overrides.get("al_nH_per_turn2")
             except Exception:
-                pass
-        ns_turns[o.name] = val
-
-    k_act = np_turns / ns_turns[main_name]
-
-    # Resolve Lm from overrides to approach Lm_target
-    gap = None
-    lm_actual = None
-    if overrides:
-        try:
-            gap_in = overrides.get("gap_m")
-            al_in = overrides.get("al_nH_per_turn2")
-        except Exception:
-            gap_in = None; al_in = None
-        if gap_in not in (None, ""):
-            try:
-                gap = float(gap_in)
-                lm_actual = MU0 * (np_turns**2) * Ae / max(gap, 1e-18)
-            except Exception:
-                gap = None
-        if (lm_actual is None) and (al_in not in (None, "")):
-            try:
-                AL = float(al_in) * 1e-9  # H/turn^2
-                lm_actual = AL * (np_turns**2)
-                gap = MU0 * (np_turns**2) * Ae / max(lm_actual, 1e-18)
-            except Exception:
-                lm_actual = None
-
-    if (gap is None) or (lm_actual is None):
-        # Fall back to target Lm (derive required gap)
-        gap = MU0 * (np_turns**2) * Ae / max(ini.lm_target_H, 1e-18)
-        lm_actual = MU0 * (np_turns**2) * Ae / max(gap, 1e-18)
-
-    # Compute DCM check with current Lm
-    ipk = (fin.vin_min * ini.d_vin_min) / (lm_actual * fin.fsw)
-    irms_pri = ipk * (ini.d_vin_min/3.0) ** 0.5
-    lsec_main = lm_actual * (ns_turns[main_name]/np_turns)**2
-    ipk_sec_main = ipk * k_act
-    toff = lsec_main * ipk_sec_main / (main.v + main.diode_drop)
-    dcm_ok = toff <= (1.0 - ini.d_vin_min) * period + 1e-15
-
-    # If force_dcm is requested and DCM not satisfied, try minimally increasing Np.
-    if force_dcm and (not dcm_ok):
-        np_turns += 1
-        iter_guard += 1
-        if iter_guard > 200:  # safeguard to avoid GUI hangs
-            break
-        continue
-    break
-# Flux swing (ΔB)
+                gap_in = None; al_in = None
+            if gap_in not in (None, ""):
+                try:
+                    gap = float(gap_in)
+                    lm_actual = MU0 * (np_turns**2) * Ae / max(gap, 1e-18)
+                except Exception:
+                    gap = None
+            if (lm_actual is None) and (al_in not in (None, "")):
+                try:
+                    AL = float(al_in) * 1e-9  # H/turn^2
+                    lm_actual = AL * (np_turns**2)
+                    gap = MU0 * (np_turns**2) * Ae / max(lm_actual, 1e-18)
+                except Exception:
+                    lm_actual = None
+    
+        if (gap is None) or (lm_actual is None):
+            # Fall back to target Lm (derive required gap)
+            gap = MU0 * (np_turns**2) * Ae / max(ini.lm_target_H, 1e-18)
+            lm_actual = MU0 * (np_turns**2) * Ae / max(gap, 1e-18)
+    
+        # Compute DCM check with current Lm
+        ipk = (fin.vin_min * ini.d_vin_min) / (lm_actual * fin.fsw)
+        irms_pri = ipk * (ini.d_vin_min/3.0) ** 0.5
+        lsec_main = lm_actual * (ns_turns[main_name]/np_turns)**2
+        ipk_sec_main = ipk * k_act
+        toff = lsec_main * ipk_sec_main / (main.v + main.diode_drop)
+        dcm_ok = toff <= (1.0 - ini.d_vin_min) * period + 1e-15
+    
+        # If force_dcm is requested and DCM not satisfied, try minimally increasing Np.
+        if force_dcm and (not dcm_ok):
+            np_turns += 1
+            iter_guard += 1
+            if iter_guard > 200:  # safeguard to avoid GUI hangs
+                break
+            continue
+        break
+    # Flux swing (ΔB)
     dB = (fin.vin_max * ini.d_vin_min) / (np_turns * Ae * fin.fsw)
-
+    
     # Wires with AWG selection
     delta = skin_depth_mm(fin.fsw)
     wires: Dict[str, Dict[str,float]] = {}
@@ -401,7 +401,7 @@ while True:
     wires["primary_parallel"] = sel_pri["parallel"]
     wires["primary_total_area_mm2"] = sel_pri["total_area_mm2"]
     wires["skin_depth_mm"] = delta
-
+    
     irms_sec_map: Dict[str,float] = {}
     for o in outputs:
         k_i = np_turns / ns_turns[o.name]
@@ -418,7 +418,7 @@ while True:
         wires[f"{o.name}_awg_area_mm2"] = sel["awg_area_mm2"]
         wires[f"{o.name}_parallel"] = sel["parallel"]
         wires[f"{o.name}_total_area_mm2"] = sel["total_area_mm2"]
-
+    
     # Voltages and clamp
     vds_ideal = fin.vin_max + k_act * (main.v + main.diode_drop)
     vds_over = 1.25
@@ -428,7 +428,7 @@ while True:
         vrrm = fin.vin_max / k_i + o.v
         diode_vrrm_ideal_each[o.name] = vrrm
         diode_vrrm_required_each[o.name] = vrrm
-
+    
     rcd_info = None
     if rcd and rcd.enable:
         Llk = ini.lm_target_H * rcd.leakage_frac
@@ -443,13 +443,13 @@ while True:
         rcd_info = dict(Llk_H=Llk, E_lk_J=E_lk, P_lk_W=P_lk, Vclamp_V=vclamp, C_snub_F=Cc, R_snub_Ohm=R, tau_s=tau)
         vds_over = max(1.0, vclamp / max(1e-12, vds_ideal))
     vds_required = vds_ideal * vds_over
-
+    
     # Fill factor
     fill_factor = None
     if geom.window_area_mm2:
         total_cu = wires["primary_total_area_mm2"] + sum(wires[f"{o.name}_total_area_mm2"] for o in outputs)
         fill_factor = 1.2 * total_cu / geom.window_area_mm2
-
+    
     ss0_core_cm4 = None
     ss0_min_cm4 = None
     if geom.window_area_mm2 and core.ae_mm2:
@@ -458,7 +458,7 @@ while True:
             ss0_min_cm4 = core_ss0_min(ini.pout_total_W, fin.fsw, core.bmax_T)
         except Exception:
             ss0_min_cm4 = None
-
+    
     # Losses
     losses: Dict[str, Any] = {}
     def rho_cu_at(Tc: float) -> float:
@@ -470,7 +470,7 @@ while True:
     Pcu_pri = (irms_pri**2) * Rdc_pri * geom.ac_factor_pri
     losses["Rdc_pri_Ohm"] = Rdc_pri
     losses["Pcu_pri_W"] = Pcu_pri
-
+    
     Pcu_secs = {}
     for o in outputs:
         ns = ns_turns[o.name]
@@ -481,7 +481,7 @@ while True:
         Pcu_sec = (irms_sec**2) * Rdc_sec * geom.ac_factor_sec
         Pcu_secs[o.name] = {"Rdc_Ohm": Rdc_sec, "Pcu_W": Pcu_sec}
     losses["Pcu_secs"] = Pcu_secs
-
+    
     p_core_W = None
     if core.core_volume_mm3 and stein:
         vol_m3 = core.core_volume_mm3 * 1e-9
@@ -495,7 +495,7 @@ while True:
         Pv = stein.ki * (deltaB ** (stein.beta - stein.alpha)) * term / period
         p_core_W = Pv * vol_m3
         losses["Pcore_W"] = p_core_W
-
+    
     P_mos_cond = 0.0; P_sw = 0.0; P_coss = 0.0; P_gate = 0.0
     if mosfet:
         Rds = (mosfet.rds_on_mohm * 1e-3) * (1.0 + mosfet.rds_temp_coeff * (mosfet.rds_temp_C - 25.0))
@@ -503,12 +503,12 @@ while True:
         tr = mosfet.tr_ns * 1e-9; tf = mosfet.tf_ns * 1e-9
         P_sw = 0.5 * vds_required * ipk * (tr + tf) * fin.fsw * mosfet.k_sw_overlap
         Coss = (mosfet.coss_pF * 1e-12 if getattr(mosfet, 'coss_pF', None) not in (None,0) else mosfet.coss_nF * 1e-9)
-
+    
         P_coss = 0.5 * Coss * (vds_required**2) * fin.fsw
         Qg = mosfet.qg_nC * 1e-9
         P_gate = Qg * mosfet.vgate_V * fin.fsw
         losses.update(dict(Pmos_cond_W=P_mos_cond, Pmos_sw_W=P_sw, Pmos_coss_W=P_coss, Pgate_W=P_gate, Pmos_total_W=(P_mos_cond+P_sw+P_coss+P_gate)))
-
+    
     P_diodes = {}
     for o in outputs:
         Pcond = o.i * o.diode_drop
@@ -519,16 +519,16 @@ while True:
             Prr = (o.qrr_nC * 1e-9) * Vrev * fin.fsw
         P_diodes[o.name] = {"Pcond_W": Pcond, "Prr_W": Prr}
     losses["Pdiodes"] = P_diodes
-
+    
     P_total_loss = (Pcu_pri + sum(v["Pcu_W"] for v in Pcu_secs.values()) +
                     (p_core_W or 0.0) + P_mos_cond + P_sw + P_coss + P_gate +
                     sum(v["Pcond_W"]+v["Prr_W"] for v in P_diodes.values()))
     losses["Ptotal_W"] = P_total_loss
     eta_est = max(0.01, ini.pout_total_W / (ini.pout_total_W + P_total_loss))
     losses["eta_est"] = eta_est
-
+    
     notes = dict(np_min_from_Bmax=np_turns, period_s=period)
-
+    
     # --- Added: per-output secondary inductance and characteristic frequencies ---
     lsec_each: Dict[str, float] = {}
     rhpz_each: Dict[str, float] = {}
@@ -547,7 +547,7 @@ while True:
         except Exception:
             C_out = 0.0
         lc_pole_each[o.name] = 1.0 / (2.0 * math.pi * math.sqrt(lsec_i*C_out)) if (lsec_i>0 and C_out>0) else 0.0
-
+    
     return RefinedDesign(
         np_turns=np_turns, ns_turns=ns_turns, k_actual_np_over_ns_main=k_act,
         gap_m=gap, lm_actual_H=lm_actual, ipk_new_A=ipk, irms_pri_new_A=irms_pri,
@@ -556,8 +556,8 @@ while True:
         diode_vrrm_ideal_each_V=diode_vrrm_ideal_each, diode_vrrm_required_each_V=diode_vrrm_required_each,
         fill_factor=fill_factor, ss0_core_cm4=ss0_core_cm4, ss0_min_cm4=ss0_min_cm4,
         rcd=rcd_info, core_loss_W=p_core_W, losses=losses, notes=notes
-    , lsec_each_H=lsec_each, rhpz_each_Hz=rhpz_each, lc_pole_each_Hz=lc_pole_each)
-
+        , lsec_each_H=lsec_each, rhpz_each_Hz=rhpz_each, lc_pole_each_Hz=lc_pole_each)
+    
 def sweep_k(fin: FlybackInput, outputs: List[OutputSpec], geom: Geometry, core: CoreParameters,
             rcd: Optional[RCDClamp]=None, stein: Optional[Steinmetz]=None, mosfet: Optional[MosfetParams]=None,
             criterion: str = "min_vds", dmin: float = 0.2, dmax: float = 0.5, dstep: float = 0.02,
