@@ -1422,66 +1422,83 @@ class App(tk.Tk):
             self.transformer_overrides = over
             messagebox.showinfo("Transformer", "Overrides saved. Нажмите Compute для пересчета.")
 
-    
-def clear_transformer_overrides(self):
-    self.transformer_overrides = {}
-    from tkinter import messagebox
-    messagebox.showinfo("Transformer", "Overrides cleared. Нажмите Compute для пересчета.")
-def compute_optocoupler(self, cfg_norm=None):
+    def clear_transformer_overrides(self):
+        """Remove saved transformer override values."""
+        self.transformer_overrides = {}
+        from tkinter import messagebox
+        messagebox.showinfo(
+            "Transformer",
+            "Overrides cleared. Нажмите Compute для пересчета.",
+        )
+
+    def compute_optocoupler(self, cfg_norm=None):
+        """Compute optocoupler parameters and update report widget."""
         try:
             if cfg_norm is None:
                 cfg = self.collect_cfg()
                 cfg_norm = self.design.normalize_cfg(cfg)
             g = {k: self.opto_vars[k].get().strip() for k in self.opto_vars}
+
             def fget(k, default):
                 try:
                     return float(g.get(k) or default)
                 except Exception:
                     return float(default)
+
             # --- Choose fc ---
-            fc_req = fget("fc", cfg_norm["input"].get("fsw", 100000.0)/10.0)
+            fc_req = fget("fc", cfg_norm["input"].get("fsw", 100000.0) / 10.0)
             # Plant hints for auto zeros/poles
-            plant_rhpz = 0.0; plant_flc = 0.0
+            plant_rhpz = 0.0
+            plant_flc = 0.0
             try:
                 res = getattr(self, "last_result", None)
                 if res and "refined" in res:
-                    main_name = res.get("input",{}).get("main_output") or res["outputs"][0]["name"]
-                    plant_rhpz = float(res["refined"].get("rhpz_each_Hz",{}).get(main_name, 0.0) or 0.0)
-                    plant_flc = float(res["refined"].get("lc_pole_each_Hz",{}).get(main_name, 0.0) or 0.0)
+                    main_name = (
+                        res.get("input", {}).get("main_output")
+                        or res["outputs"][0]["name"]
+                    )
+                    plant_rhpz = float(
+                        res["refined"].get("rhpz_each_Hz", {}).get(main_name, 0.0)
+                        or 0.0
+                    )
+                    plant_flc = float(
+                        res["refined"].get("lc_pole_each_Hz", {}).get(main_name, 0.0)
+                        or 0.0
+                    )
             except Exception:
                 pass
             params = InputParams(
-                v_out = fget("v_out", cfg_norm["outputs"][0]["v"]),
-                f_sw  = fget("f_sw", cfg_norm["input"]["fsw"]),
-                vdd   = fget("vdd", 5.0),
-                r_pullup = fget("r_pullup", 20_000.0),
-                ctr_min  = fget("ctr_min", 0.3),
-                c_opto_nf = fget("c_opto_nf", 2.0),
-                v_ref    = fget("v_ref", 2.5),
-                v_f_led  = fget("v_f_led", 1.0),
-                vce_sat  = fget("vce_sat", 0.3),
-                i_div_uA = fget("i_div_uA", 250.0),
-                v_bias_zener = fget("v_bias_zener", 6.2),
-                i_bias_mA    = fget("i_bias_mA", 1.0),
-                vfb    = fget("vfb", 2.5),
-                fc      = fget("fc", 1000.0),
-                gc_db   = fget("gc_db", -10.0),
-                boost_deg = fget("boost_deg", 60.0),
-                comp_type = g.get("comp_type", "type3"),
-                manual_enable = bool(int(g.get("adv_enable","0") or "0")),
-                manual_fz_hz = fget("fz_manual", 0.0),
-                manual_fp_hz = fget("fp_manual", 0.0),
-                manual_fz2_hz = fget("fz2_manual", 0.0),
-                manual_fp2_hz = fget("fp2_manual", 0.0),
-                auto_tune = bool(int(g.get("auto_tune","1") or "0")),
-                plant_rhpz_hz = plant_rhpz,
-                plant_flc_hz = plant_flc,
-                r_min = fget("r_min", 200.0),
-                r_max = fget("r_max", 200000.0),
-                c_min = fget("c_min", 1e-10),
-                c_max = fget("c_max", 1e-6),
-                iz_min = fget("iz_min", 0.002),
-                iz_max = fget("iz_max", 0.015),
+                v_out=fget("v_out", cfg_norm["outputs"][0]["v"]),
+                f_sw=fget("f_sw", cfg_norm["input"]["fsw"]),
+                vdd=fget("vdd", 5.0),
+                r_pullup=fget("r_pullup", 20_000.0),
+                ctr_min=fget("ctr_min", 0.3),
+                c_opto_nf=fget("c_opto_nf", 2.0),
+                v_ref=fget("v_ref", 2.5),
+                v_f_led=fget("v_f_led", 1.0),
+                vce_sat=fget("vce_sat", 0.3),
+                i_div_uA=fget("i_div_uA", 250.0),
+                v_bias_zener=fget("v_bias_zener", 6.2),
+                i_bias_mA=fget("i_bias_mA", 1.0),
+                vfb=fget("vfb", 2.5),
+                fc=fget("fc", 1000.0),
+                gc_db=fget("gc_db", -10.0),
+                boost_deg=fget("boost_deg", 60.0),
+                comp_type=g.get("comp_type", "type3"),
+                manual_enable=bool(int(g.get("adv_enable", "0") or "0")),
+                manual_fz_hz=fget("fz_manual", 0.0),
+                manual_fp_hz=fget("fp_manual", 0.0),
+                manual_fz2_hz=fget("fz2_manual", 0.0),
+                manual_fp2_hz=fget("fp2_manual", 0.0),
+                auto_tune=bool(int(g.get("auto_tune", "1") or "0")),
+                plant_rhpz_hz=plant_rhpz,
+                plant_flc_hz=plant_flc,
+                r_min=fget("r_min", 200.0),
+                r_max=fget("r_max", 200000.0),
+                c_min=fget("c_min", 1e-10),
+                c_max=fget("c_max", 1e-6),
+                iz_min=fget("iz_min", 0.002),
+                iz_max=fget("iz_max", 0.015),
             )
             report = compute_optocoupler(params)
             self.opto_text.delete("1.0", "end")
@@ -1501,8 +1518,12 @@ def compute_optocoupler(self, cfg_norm=None):
             visible.add("v_bias_zener")
         for key, frm in self.opto_field_frames.items():
             frm.grid() if key in visible else frm.grid_remove()
-        img_name = {"type1":"Optocoupler_type1.png","type2":"Optocoupler_type2.png",
-                    "type2_fast":"Optocoupler_type2_fast_lane.png","type3":"Optocoupler_type3.png"}.get(t, "Optocoupler_type1.png")
+        img_name = {
+            "type1": "Optocoupler_type1.png",
+            "type2": "Optocoupler_type2.png",
+            "type2_fast": "Optocoupler_type2_fast_lane.png",
+            "type3": "Optocoupler_type3.png",
+        }.get(t, "Optocoupler_type1.png")
         pth = os.path.join(IMAGES_DIR, img_name)
         if os.path.exists(pth):
             self.opto_img = tk.PhotoImage(file=pth); self.opto_img_label.configure(image=self.opto_img, text="")
