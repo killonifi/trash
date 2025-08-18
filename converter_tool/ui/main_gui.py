@@ -942,43 +942,43 @@ class App(tk.Tk):
         result_frame.columnconfigure(0, weight=1)
         result_frame.rowconfigure(0, weight=1)
     
-class TransformerEditDialog(tk.Toplevel):
-    def __init__(self, master, current=None):
-        super().__init__(master)
-        self.title("Edit transformer")
-        self.resizable(False, False)
-        self.result = None
-        cur = current or {}
-        frm = ttk.Frame(self, padding=10); frm.pack(fill="both", expand=True)
-        # Fields: Np, gap (mm), AL (nH/turn^2)
-        self.vars = {
-            "np_turns": tk.StringVar(value=str(cur.get("np_turns","") or "")),
-            "gap_mm": tk.StringVar(value=str(cur.get("gap_mm","") or "")),
-            "al_nH_per_turn2": tk.StringVar(value=str(cur.get("al_nH_per_turn2","") or "")),
-        }
-        row=0
-        for lbl,key in [("Primary turns Np","np_turns"),("Gap, mm","gap_mm"),("AL, nH/turn²","al_nH_per_turn2")]:
-            ttk.Label(frm, text=lbl).grid(row=row, column=0, sticky="e", pady=4, padx=6)
-            ttk.Entry(frm, textvariable=self.vars[key], width=18).grid(row=row, column=1, sticky="w")
-            row+=1
-        ttk.Label(frm, text="Заполните один или несколько параметров; пустые поля не изменяют расчет.").grid(row=row, column=0, columnspan=2, pady=(8,6))
-        btns = ttk.Frame(frm); btns.grid(row=row+1, column=0, columnspan=2, pady=6)
-        ttk.Button(btns, text="OK", command=self.ok).pack(side="left", padx=6)
-        ttk.Button(btns, text="Cancel", command=self.cancel).pack(side="left", padx=6)
+    class TransformerEditDialog(tk.Toplevel):
+        def __init__(self, master, current=None):
+            super().__init__(master)
+            self.title("Edit transformer")
+            self.resizable(False, False)
+            self.result = None
+            cur = current or {}
+            frm = ttk.Frame(self, padding=10); frm.pack(fill="both", expand=True)
+            # Fields: Np, gap (mm), AL (nH/turn^2)
+            self.vars = {
+                "np_turns": tk.StringVar(value=str(cur.get("np_turns","") or "")),
+                "gap_mm": tk.StringVar(value=str(cur.get("gap_mm","") or "")),
+                "al_nH_per_turn2": tk.StringVar(value=str(cur.get("al_nH_per_turn2","") or "")),
+            }
+            row=0
+            for lbl,key in [("Primary turns Np","np_turns"),("Gap, mm","gap_mm"),("AL, nH/turn²","al_nH_per_turn2")]:
+                ttk.Label(frm, text=lbl).grid(row=row, column=0, sticky="e", pady=4, padx=6)
+                ttk.Entry(frm, textvariable=self.vars[key], width=18).grid(row=row, column=1, sticky="w")
+                row+=1
+            ttk.Label(frm, text="Заполните один или несколько параметров; пустые поля не изменяют расчет.").grid(row=row, column=0, columnspan=2, pady=(8,6))
+            btns = ttk.Frame(frm); btns.grid(row=row+1, column=0, columnspan=2, pady=6)
+            ttk.Button(btns, text="OK", command=self.ok).pack(side="left", padx=6)
+            ttk.Button(btns, text="Cancel", command=self.cancel).pack(side="left", padx=6)
+    
+        def ok(self):
+            out = {}
+            for k,v in self.vars.items():
+                s = v.get().strip()
+                if s != "":
+                    out[k] = s
+            self.result = out or None
+            self.destroy()
+        def cancel(self):
+            self.result=None
+            self.destroy()
 
-    def ok(self):
-        out = {}
-        for k,v in self.vars.items():
-            s = v.get().strip()
-            if s != "":
-                out[k] = s
-        self.result = out or None
-        self.destroy()
-    def cancel(self):
-        self.result=None
-        self.destroy()
-
-def build_results_tab(self):
+    def build_results_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Results")
         top = ttk.Frame(tab, padding=6); top.pack(fill="x")
         ttk.Button(top, text="Compute", command=self.compute).pack(side="left", padx=4)
