@@ -1,0 +1,82 @@
+{
+  "mosfets": [
+    {
+      "name": "IRF540N",
+      "vds_V": 100,
+      "rds_on_mohm": 44,
+      "qg_nC": 67,
+      "coss_pF": 110,
+      "tr_ns": 18,
+      "tf_ns": 67,
+      "vgate_V": 10,
+      "rds_temp_C": 25,
+      "rds_temp_coeff": 0.005,
+      "k_sw_overlap": 1.0
+    },
+    {
+      "name": "IPB60R099CFD7",
+      "vds_V": 600,
+      "rds_on_mohm": 99,
+      "qg_nC": 54,
+      "coss_pF": 80,
+      "tr_ns": 12,
+      "tf_ns": 20,
+      "vgate_V": 10,
+      "rds_temp_C": 25,
+      "rds_temp_coeff": 0.005,
+      "k_sw_overlap": 1.0
+    },
+    {
+      "name": "IRF3205",
+      "vds_V": 55,
+      "rds_on_mohm": 8,
+      "qg_nC": 146,
+      "coss_pF": 3247,
+      "tr_ns": 101,
+      "tf_ns": 65,
+      "vgate_V": 10,
+      "rds_temp_C": 25,
+      "rds_temp_coeff": 0.005,
+      "k_sw_overlap": 1.0
+    },
+    {
+      "name": "IRLZ44N",
+      "vds_V": 55,
+      "rds_on_mohm": 22,
+      "qg_nC": 48,
+      "coss_pF": 1700,
+      "tr_ns": 84,
+      "tf_ns": 15,
+      "vgate_V": 5,
+      "rds_temp_C": 25,
+      "rds_temp_coeff": 0.005,
+      "k_sw_overlap": 1.0
+    },
+    {
+      "name": "IRFZ48N",
+      "vds_V": 55,
+      "rds_on_mohm": 14,
+      "qg_nC": 81,
+      "coss_pF": 470,
+      "tr_ns": 78,
+      "tf_ns": 48,
+      "vgate_V": 10,
+      "rds_temp_C": 25,
+      "rds_temp_coeff": 0.005,
+      "k_sw_overlap": 1.0
+    },
+    {
+      "name": "AO3400",
+      "vds_V": 30,
+      "rds_on_mohm": 28,
+      "qg_nC": 7,
+      "coss_pF": 630,
+      "tr_ns": 15,
+      "tf_ns": null,
+      "vgate_V": 5,
+      "rds_temp_C": 25,
+      "rds_temp_coeff": 0.005,
+      "k_sw_overlap": 1.0
+    }
+  ]
+}
