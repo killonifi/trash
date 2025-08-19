@@ -820,36 +820,106 @@ class App(tk.Tk):
         ttk.Button(btns, text="Edit", command=self.edit_output).pack(fill="x", padx=5, pady=5)
         ttk.Button(btns, text="Remove", command=self.remove_output).pack(fill="x", padx=5, pady=5)
     def build_core_tab(self):
-        tab = ttk.Frame(self.nb); self.nb.add(tab, text="Core")
+        tab = ttk.Frame(self.nb)
+        self.nb.add(tab, text="Core")
         core = self.model["core"]
-        self.core_vars = {k: tk.StringVar(value=str(core.get(k,""))) for k in ["ae_mm2","le_mm","bmax_T","core_volume_mm3","ns_main_turns": tk.StringVar(value=str(cur.get("ns_main_turns","") or "")),
+        keys = ["ae_mm2", "le_mm", "bmax_T", "core_volume_mm3"]
+        self.core_vars = {k: tk.StringVar(value=str(core.get(k, ""))) for k in keys}
+        frm = ttk.Frame(tab, padding=10)
+        frm.pack(fill="both", expand=True)
+        row = 0
+        labels = [
+            ("Ae [mm²]", "ae_mm2"),
+            ("Le [mm]", "le_mm"),
+            ("Bmax [T]", "bmax_T"),
+            ("Core volume [mm³]", "core_volume_mm3"),
+        ]
+        for lbl, key in labels:
+            ttk.Label(frm, text=lbl).grid(row=row, column=0, sticky="e", pady=4, padx=6)
+            ttk.Entry(frm, textvariable=self.core_vars[key], width=20).grid(row=row, column=1, sticky="w")
+            row += 1
+
+    class TransformerEditDialog(tk.Toplevel):
+        def __init__(self, master, current=None):
+            super().__init__(master)
+            self.title("Transformer")
+            self.result = None
+            cur = current or {}
+            main_name = cur.get("main_name", "")
+            frm = ttk.Frame(self, padding=10)
+            frm.pack(fill="both", expand=True)
+            self.vars = {
+                "np_turns": tk.StringVar(value=str(cur.get("np_turns", "") or "")),
+                "ns_main_turns": tk.StringVar(value=str(cur.get("ns_main_turns", "") or "")),
+                "gap_mm": tk.StringVar(value=str(cur.get("gap_mm", "") or "")),
             }
-            row=0
-            for lbl,key in [
-                ("Primary turns Np","np_turns"),
-                (f"Secondary turns Ns ( {main_name} )","ns_main_turns"),
-                ("Gap, mm","gap_mm"),
-                ]
-            :
+            row = 0
+            for lbl, key in [
+                ("Primary turns Np", "np_turns"),
+                (f"Secondary turns Ns ( {main_name} )", "ns_main_turns"),
+                ("Gap, mm", "gap_mm"),
+            ]:
                 ttk.Label(frm, text=lbl).grid(row=row, column=0, sticky="e", pady=4, padx=6)
                 ttk.Entry(frm, textvariable=self.vars[key], width=18).grid(row=row, column=1, sticky="w")
-                row+=1
-            ttk.Label(frm, text="Заполните один или несколько параметров; пустые поля не изменяют расчет.").grid(row=row, column=0, columnspan=2, pady=(8,6))
-            btns = ttk.Frame(frm); btns.grid(row=row+1, column=0, columnspan=2, pady=6)
+                row += 1
+            ttk.Label(
+                frm,
+                text="Заполните один или несколько параметров; пустые поля не изменяют расчет.",
+            ).grid(row=row, column=0, columnspan=2, pady=(8, 6))
+            btns = ttk.Frame(frm)
+            btns.grid(row=row + 1, column=0, columnspan=2, pady=6)
             ttk.Button(btns, text="OK", command=self.ok).pack(side="left", padx=6)
             ttk.Button(btns, text="Cancel", command=self.cancel).pack(side="left", padx=6)
-    
+
         def ok(self):
             out = {}
-            for k,v in self.vars.items():
+            for k, v in self.vars.items():
                 s = v.get().strip()
-                if s != "":
+                if s:
                     out[k] = s
             self.result = out or None
             self.destroy()
+
         def cancel(self):
-            self.result=None
+            self.result = None
             self.destroy()
+
+    def build_geom_tab(self):
+        tab = ttk.Frame(self.nb)
+        self.nb.add(tab, text="Geometry")
+        geom = self.model.get("geometry", {})
+        self.geom_vars = {k: tk.StringVar(value=str(geom.get(k, ""))) for k in geom}
+        ttk.Label(tab, text="Geometry tab is not implemented").pack(padx=10, pady=10)
+
+    def build_clamp_tab(self):
+        tab = ttk.Frame(self.nb)
+        self.nb.add(tab, text="Clamp")
+        rcd = self.model.get("rcd", {})
+        self.rcd_vars = {
+            "enable": tk.BooleanVar(value=bool(rcd.get("enable", False))),
+            "leakage_frac": tk.StringVar(value=str(rcd.get("leakage_frac", ""))),
+            "vclamp_target_V": tk.StringVar(value=str(rcd.get("vclamp_target_V", ""))),
+            "ripple_frac": tk.StringVar(value=str(rcd.get("ripple_frac", ""))),
+            "return_to_bus": tk.BooleanVar(value=bool(rcd.get("return_to_bus", False))),
+        }
+        ttk.Label(tab, text="Clamp tab is not implemented").pack(padx=10, pady=10)
+
+    def build_mosfet_tab(self):
+        tab = ttk.Frame(self.nb)
+        self.nb.add(tab, text="MOSFET")
+        mos = self.model.get("mosfet", {})
+        self.mos_vars = {k: tk.StringVar(value=str(mos.get(k, ""))) for k in mos}
+        ttk.Label(tab, text="MOSFET tab is not implemented").pack(padx=10, pady=10)
+
+    def build_k_tab(self):
+        tab = ttk.Frame(self.nb)
+        self.nb.add(tab, text="K")
+        st = self.model.get("steinmetz", {})
+        self.st_vars = {k: tk.StringVar(value=str(st.get(k, ""))) for k in ("k", "alpha", "beta")}
+        self.st_unit_var = tk.StringVar(value=str(st.get("k_unit", "")))
+        kopt = self.model.get("k_optimize", {})
+        self.k_vars = {k: tk.StringVar(value=str(kopt.get(k, ""))) for k in kopt}
+        ttk.Label(tab, text="K tab is not implemented").pack(padx=10, pady=10)
 
     def build_results_tab(self):
         tab = ttk.Frame(self.nb); self.nb.add(tab, text="Results")
@@ -1259,7 +1329,8 @@ class App(tk.Tk):
                 try:
                     Lm = float(ref.get("lm_actual_H") or 0.0)
                     Np = int(ref.get("np_turns") or 0)
-                    if Lm>0 and Np>0:
+                    if Lm > 0 and Np > 0:
+                        cur["al_nH_per_turn2"] = round(1e9 * Lm / (Np * Np), 2)
                 except Exception:
                     pass
         except Exception:
@@ -1276,7 +1347,7 @@ class App(tk.Tk):
                     over["gap_m"] = str(float(d.result["gap_mm"])/1000.0)
                 except Exception:
                     pass
-                        if "ns_main_turns" in d.result:
+            if "ns_main_turns" in d.result:
                 if cur.get('main_name'):
                     over[f"ns_turns__{cur.get('main_name')}"] = d.result["ns_main_turns"]
                 else:
